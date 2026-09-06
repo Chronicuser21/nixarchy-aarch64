@@ -8,6 +8,15 @@ inputs:
 let
   cfg = config.programs.nixarchy;
 
+  # Where the resolved-path half of the flake's safe.directory entry lives.
+  #
+  # Under /var/lib rather than /etc: /etc/gitconfig is a store symlink that
+  # nothing can append to, and this value is not knowable until the machine
+  # it describes exists. Root-owned and root-writable only, because git reads
+  # it as configuration for whoever loads it -- a file a normal user could
+  # write would be a way to hand root arbitrary git settings.
+  safeDirInclude = "/var/lib/nixarchy/gitconfig-flake";
+
   # Omarchy's session, launched from its own hyprland.lua in the store rather
   # than from ~/.config/hypr/hyprland.lua. Hyprland's --config takes the entry
   # point; the modules it requires still resolve through $HOME/.config, which
@@ -534,6 +543,68 @@ in
     # flags a repeated top-level key, and it is right that they read better
     # together.
     programs = {
+      # /etc/nixos belongs to the installed user (installer/install.sh
+      # chown_flake_dir), and git refuses to open a repository owned by
+      # somebody else. So does nix: its flake fetcher goes through libgit2,
+      # which runs the same ownership check and fails the whole evaluation
+      # with
+      #
+      #   error: opening Git repository "/etc/nixos": repository path
+      #   '/etc/nixos' is not owned by current user (libgit2 error code = 7)
+      #   error: could not find a flake.nix file
+      #
+      # -- the second line being the one people actually read, which is why
+      # this was diagnosed three times before it was understood.
+      #
+      # NOT every root command needs this. git and libgit2 both exempt root
+      # when SUDO_UID names the repository's owner, so `sudo nixos-rebuild
+      # --flake /etc/nixos#...` -- the thing a user actually types -- was
+      # never broken by the chown. What needs the entry is root WITHOUT
+      # SUDO_UID: root systemd units, a root login shell, `nixos-install`
+      # from a live ISO during a rescue reinstall, and the VM test drivers,
+      # which are root by construction and never sudo.
+      #
+      # It has to be a real config file. Passing `-c safe.directory=...` on a
+      # git command line fixes that one git invocation and does not reach nix
+      # at all, and the environment variables are no use either: nix opens
+      # repositories with git_repository_open() rather than the _FROM_ENV
+      # variant, so libgit2 leaves use_env false and ignores
+      # GIT_CONFIG_SYSTEM and GIT_CONFIG_NOSYSTEM. libgit2 does read
+      # /etc/gitconfig -- verified by strace of a root `nix eval`, which
+      # opens exactly that one system path -- and that is what this writes.
+      #
+      # Via programs.git rather than environment.etc."gitconfig" because
+      # programs.git.config merges with a user's own git settings, where two
+      # environment.etc definitions of the same file collide.
+      #
+      # One limit worth knowing: the check runs against the RESOLVED path, so
+      # an adopter who points programs.nixarchy.flake at a symlink is not
+      # covered by this entry. Name the real directory instead. Machines this
+      # installer writes have a real /etc/nixos, so the default is fine.
+      git = {
+        enable = lib.mkDefault true;
+        config = {
+          safe.directory = [ cfg.flake ];
+
+          # The literal path above is not always enough, because the ownership
+          # check runs against the RESOLVED directory: point
+          # programs.nixarchy.flake at a symlink -- /etc/nixos -> a repository
+          # in $HOME, which is how plenty of people arrange this -- and the
+          # entry never matches what libgit2 actually opened. Measured, not
+          # assumed: safe.directory naming the symlink is refused, naming the
+          # real directory is accepted.
+          #
+          # Resolving it needs the filesystem of the machine being configured,
+          # which evaluation cannot see (and reading it at eval time would mean
+          # IFD). So the resolved form is written at activation, and included
+          # from here. libgit2 does follow include.path when it collects
+          # safe.directory -- also measured -- and a missing include target is
+          # silently ignored, which is what makes the file safe to reference
+          # before the first activation has written it.
+          include.path = safeDirInclude;
+        };
+      };
+
       hyprland = {
         # This block is deliberately NOT mkDefault, unlike everything else
         # here. Omarchy *is* Hyprland, so enabling nixarchy while disabling it
@@ -591,6 +662,38 @@ in
         source ${cfg.package}/share/omarchy/default/fish/rc
       '';
     };
+
+    # The resolved half of the flake's safe.directory entry -- see the
+    # programs.git block above for why it cannot be written at evaluation
+    # time. Writes a real path only when it differs from the configured one,
+    # so on the normal case (a real directory at /etc/nixos) this leaves an
+    # empty file and changes nothing.
+    #
+    # Always writes, never appends: the file is derived state, and a stale
+    # entry left behind after somebody repoints programs.nixarchy.flake would
+    # keep exempting a directory nobody asked about.
+    system.activationScripts.nixarchyFlakeSafeDirectory = ''
+      install -d -m 0755 -o root -g root /var/lib/nixarchy
+
+      # readlink -f, not realpath: coreutils is guaranteed here and this runs
+      # before much else. A flake directory that does not exist yet resolves
+      # to nothing, which is the empty-file case and correct -- the machine
+      # simply has no flake to exempt.
+      nixarchy_flake_resolved=$(${pkgs.coreutils}/bin/readlink -f ${lib.escapeShellArg cfg.flake} 2>/dev/null || true)
+
+      {
+        echo "# Written by programs.nixarchy. Do not edit; see modules/nixos.nix."
+        if [ -n "$nixarchy_flake_resolved" ] &&
+           [ "$nixarchy_flake_resolved" != ${lib.escapeShellArg cfg.flake} ]; then
+          echo "[safe]"
+          echo "	directory = $nixarchy_flake_resolved"
+        fi
+      } > ${safeDirInclude}.tmp
+
+      chmod 0644 ${safeDirInclude}.tmp
+      chown root:root ${safeDirInclude}.tmp
+      mv -f ${safeDirInclude}.tmp ${safeDirInclude}
+    '';
 
     environment = {
       # The single indirection point. bin/, shell/, themes/, the Hyprland Lua
