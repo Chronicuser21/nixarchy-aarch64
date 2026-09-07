@@ -924,6 +924,38 @@ sudo dd if=nixarchy.iso of=/dev/sdX bs=4M status=progress oflag=sync
 `--ignore-missing` because one `SHA256SUMS` covers both images and nobody
 downloads both.
 
+### Writing the stick from Windows or macOS
+
+**Use [balenaEtcher](https://etcher.balena.io/), and take the network image.**
+That combination has no wrong answer in it: Etcher only ever writes an image
+byte-for-byte -- no filesystem to choose, no partition scheme, no mode prompt --
+and the network image is one file that needs no reassembly.
+
+If you want the offline image on Windows, join the parts first. The `/b` is
+load-bearing: without it `copy` treats them as text and stops at the first
+`0x1A` byte, leaving a file that looks complete and is not.
+
+```
+copy /b PART-aa + PART-ab + PART-ac + PART-ad nixarchy.iso
+certutil -hashfile nixarchy.iso SHA256
+```
+
+substituting the real names, and comparing that hash against `SHA256SUMS`
+yourself -- `certutil` will not read a sums file for you.
+
+**If you use Rufus instead**, it will ask one question and its recommended
+answer is the wrong one here; the next caveat explains why. Choose **DD Image
+mode**.
+
+**Turn Secure Boot off** in your firmware before booting the stick. This
+project does not sign its bootloader, which is
+[a decision rather than an oversight](#status).
+
+**Keeping Windows on the same disk?** Free the space from inside Windows
+first, and read [the dual boot page](docs/manual/dual-boot-install.md) --
+it covers Shrink Volume, the 32 GiB floor the installer enforces, and why
+BitLocker has to come off before you start.
+
 Or build it yourself, which is the same image from the same commit:
 
 ```
@@ -1032,13 +1064,70 @@ install builds nothing, because everything it did is described there.
 Installing a second machine from that same repository, and letting them keep
 themselves current, is [many machines, one repo](docs/manual/many-machines.md).
 
-**Four caveats worth knowing before you write the stick.**
+**Five caveats worth knowing before you write the stick.**
 
-It takes **the whole drive**. There is no partition picker and there is not
-going to be one: the layout is one file, `installer/disk-config.nix`, and the
-installer runs it against the disk you name. Anything already there is gone.
-Sharing a disk with Windows means editing that file and running `disko` by hand
-first, which is a thing you can do and not a thing this walks you through.
+**In Rufus, answer the ISOHybrid question with DD — not the recommended
+default.** Rufus asks once:
+
+> This image is an ISOHybrid image … Write in ISO Image mode (Recommended)
+> / Write in DD Image mode
+
+**ISO Image mode is the default and it is the wrong answer here**, and the
+reason is a file size. The offline image contains one 5.8 GB file, the Nix
+store it installs from, which is larger than FAT32 can hold -- so ISO mode
+falls back to NTFS, and because UEFI firmware cannot boot NTFS, Rufus adds its
+own bootloader to chain-load from it. *That* bootloader then tries to load this
+image's GRUB modules, cannot parse them, and stops with:
+
+```
+kern/x86_64/dl.c:grub_arch_dl_relocate_symbols:114:
+  relocation 0x18d570 is not implemented yet
+Aborted. Press any key to exit.
+```
+
+`0x18d570` is not a relocation type — real ones are small integers, and
+`R_X86_64_64` is 1 — which is how you know the loader is reading modules from
+a different build rather than that the download is corrupt. **Nothing is wrong
+with the image.** It boots under UEFI whenever the firmware runs the
+bootloader that is on it.
+
+So: **DD Image mode**. The stick then looks empty or unreadable to Windows,
+which is correct. [balenaEtcher](https://etcher.balena.io/) never asks — it
+only does raw writes — so it is the safer choice if you would rather not have
+to catch a dialog. On Linux, `dd` as above.
+
+Tools that boot the image with their own loader are a different question, and
+the honest answer is "sometimes". **Ventoy** does boot the offline image: a
+tester's install log shows `NIXARCHY_4_0_2` mounted at `/iso` from Ventoy's
+exfat partition, with the installer running and disko partitioning the disk.
+So it is not in the same category as the NTFS shim above, and this text used to
+say it was.
+
+It is still not what to reach for first. Ventoy, unetbootin, YUMI, multiboot
+sticks and "loopback this ISO" entries in an existing GRUB all interpose their
+own loader between the firmware and ours, which is one more thing that can
+differ between your machine and the one this was tested on -- and when it does
+go wrong it goes wrong at boot, before there is anything to read a log from.
+A raw write has no such layer. If Ventoy is already how you keep your sticks,
+it is reasonable to try; if you are choosing now, choose the raw write.
+
+Windows' own *Burn disc image* is for optical media and will not make a
+bootable stick at all.
+
+**It asks how to use the disk, and one of the answers erases it.** The first
+screen offers a free-space install -- it keeps what is already on the drive and
+takes only unallocated space, which is how you put this beside Windows -- and a
+full-disk install, which does exactly what it says. There is still no partition
+*editor*: free-space mode needs at least 32 GiB of contiguous unallocated space
+that you made beforehand, with Windows' own Disk Management or `gparted`, and
+it refuses rather than shrinking anything itself.
+
+Full-disk mode is one file, `installer/disk-config.nix`, run against the disk
+you name. Anything already there is gone.
+
+Making that space is a Windows job and is done before you boot the stick:
+[the dual boot page](docs/manual/dual-boot-install.md) covers Shrink Volume,
+the 32 GiB floor, Fast Startup, and BitLocker.
 
 It is **UEFI only** — the layout is an ESP with systemd-boot, and there is no
 BIOS path.
