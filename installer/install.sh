@@ -2150,6 +2150,92 @@ rescue_build() {
     echo "  No network, so there is nothing to fall back to. The image is" >&2
     echo "  missing something it should carry -- please report this with" >&2
     echo "  /var/log/nixarchy-install.log." >&2
+
+    # And WHAT it is missing, and WHY -- which needs no network at all.
+    #
+    # The branch below this one has had that report since it was written, but
+    # only when a network exists to compare against, and the case that matters
+    # is this one: the image alone, failing on its own. What the log kept
+    # instead was the consequence -- hundreds of derivations walking down to
+    # the source bootstrap, which names the toolchain and never names the
+    # thing that asked for it.
+    #
+    # `nix build --dry-run` offline lists what would be built. why-depends
+    # then answers the question the list cannot: which part of THIS system
+    # reaches the thing that needs a compiler. Guessing at that from the list
+    # is how three wrong causes were proposed for one failure.
+    #
+    # Everything here is best-effort and cannot change the outcome: the
+    # install has already failed and this function returns 1 either way.
+    # Which of the build's own foundations are actually on this machine.
+    #
+    # The chain why-depends prints ends at the source bootstrap, and the
+    # question that answers is "what did the image fail to carry" -- but the
+    # answer is one level up: a toplevel that differs from the image's has to
+    # be BUILT here, and building anything needs a stdenv. If stdenvNoCC is
+    # not a valid path on this machine, nix has no choice but to make one,
+    # and making one from nothing is mescc-tools and hex0.
+    #
+    # installer/cd.nix seeds these deliberately (buildInputsOfWhatChanges,
+    # and tests/install-iso.nix's REBUILT step names that list as "where the
+    # answer is" if this ever happens). So this prints whether the seeding
+    # WORKED, which is a different question from whether it was written --
+    # and the two were indistinguishable from the log until now.
+    # The pkgs of the machine being installed, derived from the flakeref this
+    # function was handed rather than from a variable a caller might forget:
+    #   /mnt/etc/nixos#nixosConfigurations.<host>.config.system.build.toplevel
+    #                 \________________ this half ________/
+
+    local plan builds drv
+    plan=$(nix "${NIX_FLAGS[@]}" build --dry-run "$flakeref" 2>&1) || true
+    builds=$(printf '%s\n' "$plan" | sed -n 's|^ *\(/nix/store/[^ ]*\.drv\)$|\1|p')
+
+    if [ -n "$builds" ]; then
+      echo >&2
+      echo "  It would have to build $(printf '%s\n' "$builds" | wc -l) derivations." >&2
+      echo "  The first few:" >&2
+      printf '%s\n' "$builds" | head -15 | sed 's|^|    |' >&2
+
+      # WHICH INPUT IS MISSING, asked of nix rather than guessed.
+      #
+      # The build list is read top-down here on purpose: its last entries are
+      # the machine's own targets -- its initrd, its boot.json, its units --
+      # and those are EXPECTED to be built. What is not expected is that one
+      # of their inputs is absent, because that single absence is what sends
+      # nix down to the source bootstrap for everything underneath.
+      #
+      # A first version of this check named five packages it thought were the
+      # likely ones (stdenv, stdenvNoCC, bash, coreutils, perl) and reported
+      # all five present, which was true and useless. Nix knows the answer
+      # exactly; it only has to be asked.
+      for drv in $(printf '%s\n' "$builds" | grep -vE -- '-(bootstrap-|stage[0-9]|hex[0-9]|M[0-9]|mescc|catm|cc_arch|blood-elf|kaem|stage0)' | tail -3); do
+        echo >&2
+        echo "  Inputs of $(basename "$drv") that are NOT on this machine:" >&2
+        nix "${NIX_FLAGS[@]}" derivation show "$drv" 2>/dev/null \
+          | jq -r '.[].inputDrvs | keys[]' 2>/dev/null \
+          | while read -r d; do
+              nix "${NIX_FLAGS[@]}" derivation show "$d" 2>/dev/null \
+                | jq -r '.[].outputs[].path' 2>/dev/null \
+                | while read -r o; do
+                    nix "${NIX_FLAGS[@]}" path-info "$o" >/dev/null 2>&1 \
+                      || echo "    $o"
+                  done
+            done | sort -u | head -12 >&2
+      done
+
+      # The ones worth explaining are the packages, not this machine's own
+      # etc fragments and units -- those are expected to be built and are
+      # cheap. A compiler appearing under any of them is the actual finding.
+      for drv in $(printf '%s\n' "$builds" \
+        | grep -vE -- '-(etc|activate|dry-activate|system-path|system-units|user-units|unit-|X-Restart|initrd|boot\.json|users-groups|nixos-system|.*\.conf|.*\.service|hosts|.*-hostname)' \
+        | head -3); do
+        echo >&2
+        echo "  Why this system needs $(basename "$drv"):" >&2
+        nix "${NIX_FLAGS[@]}" why-depends --derivation "$flakeref" "$drv" 2>&1 \
+          | head -20 | sed 's|^|    |' >&2 || true
+      done
+    fi
+
     return 1
   fi
 
