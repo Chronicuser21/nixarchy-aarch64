@@ -28,44 +28,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
-      - uses: DeterminateSystems/nix-installer-action@main
-        with:
-          # Honour this flake's own nixConfig instead of warning and
-          # discarding it. Without this every `nix build` here prints
-          #
-          #   warning: ignoring untrusted flake configuration setting
-          #   'extra-substituters'. Pass '--accept-flake-config' to trust it
-          #
-          # and the nixarchy and hyprland caches flake.nix declares are
-          # simply not used. The hyprland one was then re-added by hand in
-          # ONE job, writing /etc/nix/nix.conf because "without this the
-          # runner compiles a compositor from source and times out" -- a
-          # workaround for a setting the flake already carried.
-          #
-          # Scoped to the flake being invoked, which is this repository's
-          # own. It does not extend trust to inputs.
-          # accept-flake-config alone is not enough, and the reason cost a
-          # day: the runner is not in the daemon's `trusted-users`, so every
-          # substituter and key the flake declares is DISCARDED with
-          #
-          #   warning: ignoring the client-specified setting
-          #   'trusted-public-keys', because it is a restricted setting and
-          #   you are not a trusted user
-          #
-          # and the job then BUILDS what it should have downloaded. On
-          # 2026-09-07 the `omarchy` and `box` jobs each compiled Hyprland to
-          # 55% and hit timeout-minutes, while `system` survived only because
-          # it had a hand-written `sudo tee -a /etc/nix/nix.conf` step nobody
-          # had copied to the others.
-          #
-          # extra-conf is written into the SYSTEM nix.conf as root, so what is
-          # set here is trusted and actually applies. The store path nixarchy
-          # uses is byte-identical to the one hyprwm publish -- verified, not
-          # assumed -- so with this the compositor is a download.
-          extra-conf: |
-            accept-flake-config = true
-            extra-substituters = https://nixarchy.cachix.org https://hyprland.cachix.org
-            extra-trusted-public-keys = nixarchy.cachix.org-1:05JOuIlsQOWY2/5DQMq7JEA1hwlhgvmMWowMfka8mMM= hyprland.cachix.org-1:a7pgxzMz7+chwVL3/pzj6jIITemDosxrE9/Kb+PfYvE=
+      - uses: ./.github/actions/setup-nix
       - uses: cachix/cachix-action@v17
         # A cache upload failing must not fail a build that succeeded (#235).
         continue-on-error: true
@@ -102,6 +65,25 @@ jobs:
           # repacks, and it avoids trusting a filename-to-attribute convention
           # nothing enforces.
           mapfile -t attrs < <(nix eval --json .#update.pinned | jq -r '.[] | ".#" + .')
+
+          # mapfile returns 0 whatever the process substitution did -- a failed
+          # eval, a renamed output, a jq that is not there -- and an empty
+          # array then makes the line below `nix build --impure
+          # --print-build-logs` with no installables, which builds .#default
+          # and exits GREEN. The one step that proves the rewritten packages
+          # still build would have built none of them and said nothing.
+          #
+          # Six is what .#update.pinned holds today (hey-cli, omacalc, omacut,
+          # omawrite, once, ttfx). The floor is 1 rather than 6 so removing a
+          # package from the set is an ordinary edit and not a CI break, while
+          # "the list came back empty" still stops the job.
+          if [ "${#attrs[@]}" -eq 0 ]; then
+            echo "::error::.#update.pinned produced no attributes, so this step" \
+                 "would build .#default and pass without checking the packages" \
+                 "the bump just rewrote" >&2
+            exit 1
+          fi
+
           echo "building: ${attrs[*]}"
           nix build --impure --print-build-logs "${attrs[@]}"
 
