@@ -10,6 +10,7 @@
 {
   runCommand,
   jq,
+  pkgs,
   self,
 }:
 let
@@ -37,6 +38,11 @@ let
   # update independently of it.
   ref = "release";
   refUrl = "github:olafkfreund/nixarchy/${ref}";
+
+  # The machine this installer runs on (and writes the flake for). Added by
+  # the aarch64 variant of this fork: upstream bakes x86_64-linux into the
+  # template, which no Apple Silicon target could evaluate.
+  hostSystem = pkgs.stdenv.hostPlatform.system;
 in
 runCommand "nixarchy-flake-template"
   {
@@ -46,6 +52,7 @@ runCommand "nixarchy-flake-template"
       url
       ref
       refUrl
+      hostSystem
       ;
     inherit (self) narHash;
 
@@ -170,5 +177,6 @@ runCommand "nixarchy-flake-template"
     printf '%s\n' "$url" > $out/.nixarchy-url
 
     sed -i -e "s|@nixarchy_url@|$refUrl|g" \
-           -e "s|@nixpkgs_url@|$nixpkgs_url|g" $out/flake.nix
+           -e "s|@nixpkgs_url@|$nixpkgs_url|g" \
+           -e "s|@hostSystem@|$hostSystem|g" $out/flake.nix
   ''

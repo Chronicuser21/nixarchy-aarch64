@@ -60,7 +60,7 @@
       nixosConfigurations = lib.genAttrs hosts (
         name:
         lib.nixosSystem {
-          system = "x86_64-linux";
+          system = "@hostSystem@";
           # The module takes `inputs` and reads inputs.self for its own outputs,
           # so hand it nixarchy's inputs with nixarchy standing in as self.
           # hosts/<name>/default.nix reaches installer/host.nix through it.

@@ -880,8 +880,11 @@
       # is spent on the long tail.
       nixosConfigurations = {
         # The live image. See installer/cd.nix.
+        #
+        # The aarch64 variant of this fork builds these two for Apple Silicon
+        # targets; the upstream (olafkfreund/nixarchy) keeps them x86_64-linux.
         iso = nixpkgs.lib.nixosSystem {
-          system = "x86_64-linux";
+          system = "aarch64-linux";
           specialArgs = {
             inherit inputs;
             offline = true;
@@ -892,7 +895,7 @@
         # Same module, one argument different. See the `offline` parameter in
         # installer/cd.nix for what it turns off.
         iso-net = nixpkgs.lib.nixosSystem {
-          system = "x86_64-linux";
+          system = "aarch64-linux";
           specialArgs = {
             inherit inputs;
             offline = false;

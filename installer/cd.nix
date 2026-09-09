@@ -200,8 +200,10 @@ let
       # installed systems drifting apart. These agree -- modules/nixos.nix sets
       # the option for both -- and the microcode is still needed, because the
       # initrd is rebuilt per machine no matter how well they agree.
+      ] ++ lib.optionals (pkgs.stdenv.hostPlatform.isx86_64) [
       pkgs.microcode-intel
       pkgs.microcode-amd
+    ] ++ [
 
       # kmod's `dev` output, and it is worth saying why one output of one
       # package gets its own entry.
@@ -524,7 +526,7 @@ in
   # so it cannot drift from what is actually on the image.
   image.baseName = lib.mkForce "nixarchy-${version}${variant}-${
     inputs.self.shortRev or "dirty"
-  }-x86_64";
+  }-${pkgs.stdenv.hostPlatform.qemuArch}";
 
   # A volume ID that overflows 32 characters or carries a character outside
   # [A-Z0-9_] is silently truncated or mangled by the ISO tooling, and the
