@@ -406,6 +406,9 @@
     ours = true;
     unfree = true;
     arch = "grok-bot";
+    # x86_64-only .deb -- pkgs/apps/grok-bot.nix marks itself broken on any
+    # other host (aarch64 fork), so the Install row leading to it fails at
+    # build rather than installing a binary the desktop cannot exec.
   };
   t3-code = {
     # The row arrived in Omarchy 4.0.3, exactly as the note that stood here

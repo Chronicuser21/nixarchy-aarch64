@@ -35,6 +35,17 @@
     # Why: docs/internals/flake.md#declarative-flatpaks-for-the-software-nixpkgs-genu
     nix-flatpak.url = "github:gmodena/nix-flatpak/v0.7.0";
 
+    # The aarch64 fork adds Apple Silicon. The installer ISO boots an M1
+    # through the m1n1/U-Boot stub the Asahi installer left behind, but the
+    # machine the installer WRITES needs the apple-silicon-support module
+    # (kernel, m1n1, U-Boot, Mesa AUX) to boot again without it. Import
+    # nixosModules.appleSilicon in the generated hosts/<name>/ flake on these
+    # machines; see the README's "Installing on Apple Silicon".
+    apple-silicon = {
+      url = "github:nix-community/nixos-apple-silicon";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     # The installer's one disk layout is a disko expression, and the installed
     # machine imports the same file -- that is what keeps `fileSystems`
     # declarative instead of frozen into a hardware-configuration.nix nobody
@@ -868,6 +879,7 @@
       nixosModules = {
         default = self.nixosModules.nixarchy;
         nixarchy = import ./modules/nixos.nix inputs;
+        appleSilicon = import ./modules/apple-silicon.nix inputs;
       };
 
       homeManagerModules = {

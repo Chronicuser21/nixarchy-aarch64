@@ -1163,10 +1163,22 @@ Arch Linux machine that has it):
    U-Boot, then `nix run github:Chronicuser21/nixarchy-aarch64#install`.
 
 What the installer writes to the target must add the Apple-Silicon plumbing
-the ISO does not carry: import the `nixos-apple-silicon` module (kernel,
-m1n1, U-Boot, Mesa/touchbar) into the generated `hosts/<name>/` flake before
-the first `nixos-install` — the template this fork ships otherwise installs an
-UEFI-only systemd-boot machine that will not boot without those bits.
+the ISO does not carry. This fork ships it as `nixosModules.appleSilicon`
+(importing `nixos-apple-silicon`'s `apple-silicon-support`, whose kernel,
+m1n1, U-Boot and Mesa wrap make the machine boot again without the Asahi
+stub). Add it to the generated `hosts/<name>/` flake:
+
+```nix
+{
+  imports = [
+    nixarchy.nixosModules.appleSilicon
+  ];
+  hardware.asahi.enable = true;
+}
+```
+
+The plain upstream template (UEFI systemd-boot with no m1n1 round trip)
+will not boot on Apple Silicon without those bits.
 
 And if you encrypt, **the passphrase prompt at boot comes before Bluetooth
 exists**. A wireless keyboard that pairs after the desktop is up cannot type

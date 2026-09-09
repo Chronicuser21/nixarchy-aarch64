@@ -162,6 +162,11 @@ stdenv.mkDerivation {
     homepage = "https://x.ai/bot";
     license = lib.licenses.unfree;
     platforms = [ "x86_64-linux" ];
+    # Shipped as an x86-only .deb (see the header). On any other platform the
+    # fork builds it fine -- dpkg-deb just unpacks it -- but the result is a
+    # binary that cannot run. Fail loudly at nix build time rather than
+    # installing one the desktop then cannot exec.
+    broken = !stdenv.hostPlatform.isx86_64;
     sourceProvenance = [ lib.sourceTypes.binaryNativeCode ];
     mainProgram = "grok-bot";
   };
