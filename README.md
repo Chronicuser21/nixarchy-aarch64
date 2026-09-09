@@ -1141,7 +1141,32 @@ the 32 GiB floor, Fast Startup, and BitLocker.
 It is **UEFI only** — the layout is an ESP with systemd-boot, and there is no
 BIOS path.
 
-**`x86_64-linux` only.** Nothing else is built or tested.
+**Upstream is `x86_64-linux` only** — nothing else is built or tested there.
+This fork pins the two installer images (`iso`, `iso-net`) to `aarch64-linux`
+and makes the machine flake the installer writes take its system from the host
+that wrote it. On ARM the supported path is **`iso-net`** (network image): the
+offline `iso` bakes x86-only reference hosts (Intel/AMD GPU drivers and both
+microcode sets) and so stays as it is upstream. Expect the full `nix flake
+check` suite to keep living on x86_64 CI — several tests drive qemu's
+x86_64 emulator, which an aarch64 builder does not ship.
+
+### Installing on Apple Silicon
+
+The aarch64 ISO still cannot boot an M1 by itself: the machine has no UEFI
+until m1n1 and U-Boot are present. You have two roads, both of which assume
+the m1n1/U-Boot setup already on the box (this fork was born on an Asahi
+Arch Linux machine that has it):
+
+1. **Boot the ISO** — write `result/iso/*.iso` to USB (or SD) and let the
+   existing U-Boot's UEFI boot it, then run the normal installer.
+2. **Phase-1 style** — boot any aarch64 NixOS live image through the same
+   U-Boot, then `nix run github:Chronicuser21/nixarchy-aarch64#install`.
+
+What the installer writes to the target must add the Apple-Silicon plumbing
+the ISO does not carry: import the `nixos-apple-silicon` module (kernel,
+m1n1, U-Boot, Mesa/touchbar) into the generated `hosts/<name>/` flake before
+the first `nixos-install` — the template this fork ships otherwise installs an
+UEFI-only systemd-boot machine that will not boot without those bits.
 
 And if you encrypt, **the passphrase prompt at boot comes before Bluetooth
 exists**. A wireless keyboard that pairs after the desktop is up cannot type
