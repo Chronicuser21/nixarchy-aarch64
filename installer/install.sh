@@ -1280,13 +1280,19 @@ validate_answers() {
 # it is the same template. flake.nix is in the list only for the fresh case --
 # a cloned repository already has one, and it carries no tokens.
 substitute_host_files() {
-  local f
+  local f is_apple_silicon
+  # The fork's Apple-Silicon wiring: only an arm64 machine needs m1n1 +
+  # U-Boot, so the token is a plain true/false the template can import on.
+  [ "$(uname -m)" = aarch64 ] && is_apple_silicon=true || is_apple_silicon=false
   for f in "$work/flake.nix" "$hostdir/default.nix" "$hostdir/configuration.nix"; do
     [ -f "$f" ] || continue
     subst "$f" '@hostname@' "$hostname"
     subst "$f" '@username@' "$username"
     subst "$f" '@device@' "$device"
     subst "$f" '@diskmode@' "$disk_mode"
+    # Quoted in the template, like @encrypt@: the bare token is not
+    # parseable Nix. The value replaces the token AND its quotes.
+    subst "$f" '"@apple_silicon@"' "$is_apple_silicon"
     subst "$f" '@timezone@' "$timezone"
     subst "$f" '@keymap@' "$keymap"
     # Quoted in the template because a bare token is not parseable Nix; the

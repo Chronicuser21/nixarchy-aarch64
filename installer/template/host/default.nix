@@ -6,7 +6,7 @@
 #
 # The directory name is the hostname: ../../flake.nix reads ./hosts to find
 # machines, so renaming the directory renames the configuration.
-{ inputs, ... }:
+{ inputs, lib, ... }:
 {
   imports = [
     # Read from the nixarchy store path rather than copied in, so it tracks the
@@ -45,5 +45,16 @@
     ./nixarchy-hardware.nix
 
     ./configuration.nix
+
+    # This fork exists for Apple Silicon: on arm64 the machine cannot boot
+    # without m1n1 + U-Boot, so wire nixos-apple-silicon in automatically.
+    # A real ``true``/``false``: the installer substitutes "@apple_silicon@"
+    # along with its quotes, exactly like @encrypt@. Quoted because a bare
+    # token is not parseable Nix, and a module arg in imports is the
+    # documented module-system infinite recursion -- so no gating on pkgs.
+    # Inert on x86_64. inputs.self is nixarchy, via the specialArgs above.
+  ]
+  ++ lib.optionals "@apple_silicon@" [
+    inputs.self.nixosModules.appleSilicon
   ];
 }
