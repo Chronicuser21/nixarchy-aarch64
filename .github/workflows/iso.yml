@@ -36,16 +36,13 @@ jobs:
     timeout-minutes: 360
     steps:
       - name: Free disk space
-        uses: endersonmenezes/free-disk-space@v4.0.0
+        uses: jlumbroso/free-disk-space@main
 
       - name: Checkout
         uses: actions/checkout@v5
 
       - name: Install Nix
-        run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://install.determinate.systems/nix | sh -s -- install linux -y
-        env:
-          NIX_INSTALLER_NO_CONFIRM: "1"
+        uses: determinatesystems/nix-installer-action@v23
 
       - name: Build iso-net
         run: |
