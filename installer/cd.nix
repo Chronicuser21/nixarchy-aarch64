@@ -201,7 +201,7 @@ let
       # the option for both -- and the microcode is still needed, because the
       # initrd is rebuilt per machine no matter how well they agree.
     ]
-    ++ lib.optionals (pkgs.stdenv.hostPlatform.isx86_64) [
+    ++ lib.optionals pkgs.stdenv.hostPlatform.isx86_64 [
       pkgs.microcode-intel
       pkgs.microcode-amd
     ]
