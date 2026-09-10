@@ -76,8 +76,7 @@ jobs:
           gh release view omarchy-asahi --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
             || gh release create omarchy-asahi --repo "$GITHUB_REPOSITORY" \
               --title "omarchy-asahi (Apple Silicon, macOS-side installer)" \
-              --notes "No-USB Apple Silicon install. Run from macOS:
-sh <(curl -sL https://github.com/$GITHUB_REPOSITORY/releases/download/omarchy-asahi/install.sh)"
+              --notes "No-USB Apple Silicon install. Run from macOS: sh <(curl -sL https://github.com/$GITHUB_REPOSITORY/releases/download/omarchy-asahi/install.sh)"
           gh release upload omarchy-asahi --repo "$GITHUB_REPOSITORY" --clobber \
             "$zip" "$data" installer/asahi/install.sh
 
