@@ -150,6 +150,19 @@
 
       omarchyVersion = "4.0.3";
 
+      # The macOS-side, no-USB installer (see installer/asahi/ and the
+      # README's Apple Silicon section): a whole-disk NixOS image the stock
+      # Asahi installer lays down, plus the os package (zip +
+      # installer_data.json) that the bootstrap downloads. Build it on the
+      # arm64 runner: `nix build .#asahi-installer`. System-independent, so
+      # it sits in the top-level let rather than in the packages attrset,
+      # whose non-recursive `{ ... }` cannot see its own attributes.
+      asahi = import ./installer/asahi/installer.nix {
+        inherit (inputs) nixpkgs;
+        inherit inputs;
+        version = omarchyVersion;
+      };
+
       # Why: docs/internals/flake.md#which-nixarchy-built-this-machine-208-for-nixarchy
       nixarchyRev = self.shortRev or self.dirtyShortRev or "unknown";
       #
@@ -844,18 +857,9 @@
             ignoreCollisions = true;
           };
 
-          # The macOS-side, no-USB installer (see installer/asahi/ and the
-          # README's Apple Silicon section): a whole-disk NixOS image the
-          # stock Asahi installer lays down, plus the os package (zip +
-          # installer_data.json) that the bootstrap downloads. The pipeline
-          # runs qemu-aarch64 to write the bootloader, so build it on the
-          # arm64 runner: `nix build .#asahi-installer`.
-          asahi = import ./installer/asahi/installer.nix {
-            inherit (inputs) nixpkgs;
-            inherit inputs;
-            version = omarchyVersion;
-          };
-
+          # The macOS-side, no-USB installer: the os package and the
+          # installer_data.json, assembled in flake/README's Apple Silicon
+          # section (the `asahi` derivation lives in the top-level let).
           asahi-image = asahi.image;
           asahi-installer = asahi.installer;
         }
