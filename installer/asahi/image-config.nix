@@ -135,8 +135,8 @@
   hardware.asahi = {
     # Can't legally be included in the image: the Wi-Fi/webcam firmware lives
     # on the ESP the Asahi installer stages and is extracted on first boot.
+    enable = true;
     extractPeripheralFirmware = false;
-    useExperimentalGPUDriver = true;
   };
 
   zramSwap = {
