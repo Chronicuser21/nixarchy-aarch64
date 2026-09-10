@@ -1,0 +1,56 @@
+{
+  inputs,
+  pkgs,
+  ...
+}:
+{
+  imports = [
+    inputs.apple-silicon.nixosModules.apple-silicon-support
+  ];
+
+  boot = {
+    loader.systemd-boot.enable = true;
+    loader.efi.canTouchEfiVariables = false;
+  };
+
+  hardware.asahi = {
+    peripheralFirmwareDirectory = /boot/asahi;
+    setupAsahiSound = true;
+    useExperimentalGPUDriver = true;
+  };
+
+  zramSwap = {
+    enable = true;
+    memoryPercent = 100;
+  };
+
+  nix.settings = {
+    experimental-features = [
+      "flakes"
+      "nix-command"
+    ];
+  };
+
+  networking = {
+    networkmanager.enable = true;
+    networkmanager.wifi.backend = "iwd";
+    wireless.iwd = {
+      enable = true;
+      settings.General.EnableNetworkConfiguration = true;
+    };
+  };
+
+  environment.systemPackages = with pkgs; [
+    asahi-bless
+    git
+  ];
+
+  users.mutableUsers = true;
+
+  users.users.alice = {
+    isNormalUser = true;
+    extraGroups = [ "wheel" ];
+  };
+
+  system.stateVersion = "25.05";
+}

@@ -843,6 +843,21 @@
             paths = pkgsFor.${system}.omarchy.passthru.runtimeDeps;
             ignoreCollisions = true;
           };
+
+          # The macOS-side, no-USB installer (see installer/asahi/ and the
+          # README's Apple Silicon section): a whole-disk NixOS image the
+          # stock Asahi installer lays down, plus the os package (zip +
+          # installer_data.json) that the bootstrap downloads. The pipeline
+          # runs qemu-aarch64 to write the bootloader, so build it on the
+          # arm64 runner: `nix build .#asahi-installer`.
+          asahi = import ./installer/asahi/installer.nix {
+            inherit (inputs) nixpkgs;
+            inherit inputs;
+            version = omarchyVersion;
+          };
+
+          asahi-image = asahi.image;
+          asahi-installer = asahi.installer;
         }
         # Why: docs/internals/flake.md#two-runners-per-data-microvm-templates-nix-entry-b
         // lib.concatMapAttrs (

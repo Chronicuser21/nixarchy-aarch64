@@ -1,0 +1,87 @@
+# Build the macOS-side, no-USB Apple Silicon installer and publish it as GitHub
+# release assets under the fixed tag `omarchy-asahi`, which is what
+# installer/asahi/install.sh points at:
+#
+#   sh <(curl -sL https://github.com/Chronicuser21/nixarchy-aarch64/releases/download/omarchy-asahi/install.sh)
+#
+# The package (zip + installer_data.json, from `nix build .#asahi-installer`)
+# is a whole-disk NixOS image split into an ESP and root partition the stock
+# Asahi installer lays down. Building it is heavier than iso-net: the last two
+# stages run a qemu-aarch64 VM to write the bootloader while the ESP is a real
+# block device (make-disk-image.nix). Hosted runners expose no /dev/kvm, so
+# that VM runs under TCG -- slower, still correct.
+#
+# Disk is tighter than for the ISO: the closure, the .raw staging images, and
+# the final zip share one 14 GB runner, so the free-disk step runs first.
+# Release assets are unlimited and unexpired for public repos, so no
+# artifact-splitting is needed here.
+
+name: asahi
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: asahi-build
+  cancel-in-progress: false
+
+jobs:
+  build-and-package:
+    name: build and publish asahi package
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 360
+    steps:
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install Nix
+        uses: determinatesystems/nix-installer-action@v23
+
+      - name: Build the asahi package
+        run: |
+          export PATH="/nix/var/nix/profiles/default/bin:$PATH"
+          df -h
+          nix --version
+          nix build .#asahi-installer --print-build-logs || { echo "Build failed"; nix log .#asahi-installer 2>/dev/null || true; exit 1; }
+          if [ ! -d result ]; then
+            echo "ERROR: 'result' symlink not created by build"
+            ls -la
+            exit 1
+          fi
+          ls -lh result
+          echo "result -> $(readlink -f result)"
+
+      - name: Publish to releases/download/omarchy-asahi
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          zip=$(find -L result -maxdepth 1 -type f -name 'omarchy-asahi-*.zip' | head -n1)
+          data=$(find -L result -maxdepth 1 -type f -name 'installer_data-*.json' | head -n1)
+          for f in "$zip" "$data"; do
+            if [ -z "$f" ] || [ ! -s "$f" ]; then
+              echo "missing package file from result:"; ls -la result
+              exit 1
+            fi
+          done
+          # Refresh every run: the assets keep their names, so a fixed-tag
+          # clobber is enough -- the bootstrap only reads and names the same
+          # files each time.
+          gh release view omarchy-asahi --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create omarchy-asahi --repo "$GITHUB_REPOSITORY" \
+              --title "omarchy-asahi (Apple Silicon, macOS-side installer)" \
+              --notes "No-USB Apple Silicon install. Run from macOS:
+sh <(curl -sL https://github.com/$GITHUB_REPOSITORY/releases/download/omarchy-asahi/install.sh)"
+          gh release upload omarchy-asahi --repo "$GITHUB_REPOSITORY" --clobber \
+            "$zip" "$data" installer/asahi/install.sh
+
+      - name: Summary
+        run: |
+          echo "One-command install (run from macOS):"
+          echo "  sh <(curl -sL https://github.com/$GITHUB_REPOSITORY/releases/download/omarchy-asahi/install.sh)"

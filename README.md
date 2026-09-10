@@ -1153,7 +1153,7 @@ x86_64 emulator, which an aarch64 builder does not ship.
 ### Installing on Apple Silicon
 
 The aarch64 ISO still cannot boot an M1 by itself: the machine has no UEFI
-until m1n1 and U-Boot are present. You have two roads, both of which assume
+until m1n1 and U-Boot are present. You have three roads, all of which assume
 the m1n1/U-Boot setup already on the box (this fork was born on an Asahi
 Arch Linux machine that has it):
 
@@ -1161,6 +1161,7 @@ Arch Linux machine that has it):
    existing U-Boot's UEFI boot it, then run the normal installer.
 2. **Phase-1 style** — boot any aarch64 NixOS live image through the same
    U-Boot, then `nix run github:Chronicuser21/nixarchy-aarch64#install`.
+3. **No USB at all** — the image-based installer below, driven from macOS.
 
 Whichever road, the installer detects the layout the Asahi installer left —
 the dedicated ESP and the one Linux partition (GPT 8300/8309, typically
@@ -1196,6 +1197,38 @@ stub). Add it to the generated `hosts/<name>/` flake:
 
 The plain upstream template (UEFI systemd-boot with no m1n1 round trip)
 will not boot on Apple Silicon without those bits.
+
+### Road 3: the image-based installer, no USB
+
+The Asahi installer can lay down a ready-made NixOS image the same way it
+lays down Fedora, so this fork ships one: a whole-disk image (ESP + btrfs
+root) that `installer/asahi/` builds into the os package the installer
+consumes. Built on the free arm64 runner by the **asahi** workflow and
+published to release assets under the fixed tag `omarchy-asahi`, it installs
+with a single command from macOS:
+
+```
+sh <(curl -sL https://github.com/Chronicuser21/nixarchy-aarch64/releases/download/omarchy-asahi/install.sh)
+```
+
+What you get, and where it differs from roads 1/2:
+
+- It is **image-based**: the Asahi installer resizes macOS, writes the image
+  to its own partitions, and stages m1n1 + U-Boot, the same flow as any other
+  distro. macOS is kept and untouched; any previous Linux partition on the
+  disk is replaced. It is not the interactive installer — `ask_disk_mode` and
+  the dual-boot ESP-adoption questions never run here, and what the image
+  carries is the stock Apple-Silicon configuration in `installer/asahi/`, not
+  the wizard's per-machine answers.
+- First run is the usual Asahi prep: SIP relaxed enough for the one-time
+  recovery hand-off (the script says what it needs) and, if you do not have a
+  stubbed macOS volume yet, the installer creates it once.
+- The image expands its root to the disk and extracts the Wi-Fi/webcam
+  firmware on first boot, then gives you a console autologin to root.
+
+Use the USB live ISO when you want the interactive/rescue path; use the
+one-liner when you want NixOS on the machine in minutes without touching a
+boot medium.
 
 And if you encrypt, **the passphrase prompt at boot comes before Bluetooth
 exists**. A wireless keyboard that pairs after the desktop is up cannot type
