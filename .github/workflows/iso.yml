@@ -55,8 +55,13 @@ jobs:
         run: |
           set -euo pipefail
           export PATH="/nix/var/nix/profiles/default/bin:$PATH"
-          iso=$(find result -maxdepth 3 -name '*.iso' | head -n1)
-          [ -n "$iso" ] || { echo "no .iso under result/"; find result -maxdepth 3 -type f | head; exit 1; }
+          echo "result -> $(readlink -f result)"
+          iso=$(find -L result -maxdepth 3 -type f -name '*.iso' | head -n1)
+          if [ -z "$iso" ]; then
+            echo "no .iso; result tree:"
+            ls -laR result | head -60
+            exit 1
+          fi
           ls -lh "$iso"
           mkdir -p parts
           split -b 480M -d -a 2 "$iso" parts/omarchy-aarch64.iso.part-
