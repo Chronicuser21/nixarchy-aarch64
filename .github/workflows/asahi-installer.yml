@@ -42,13 +42,26 @@ jobs:
 
       - name: Install Nix
         uses: determinatesystems/nix-installer-action@v23
+        with:
+          # Hosted arm64 runners have no /dev/kvm, so the daemon advertises no
+          # "kvm" feature and refuses to schedule our runInLinuxVM stage (that
+          # derivation is allowSubstitutes=false). Advertising the feature lets
+          # it through; qemu drops to TCG at runtime when /dev/kvm is absent.
+          extra-conf: |
+            system-features = kvm benchmark big-parallel nixos-test
 
       - name: Build the asahi package
         run: |
           export PATH="/nix/var/nix/profiles/default/bin:$PATH"
           df -h
           nix --version
-          nix build .#asahi-installer --print-build-logs || { echo "Build failed"; nix log .#asahi-installer 2>/dev/null || true; exit 1; }
+          ls -l /dev/kvm 2>&1 || true
+          nix show-config | grep -i system-features || true
+          nix build .#asahi-installer --print-build-logs 2>&1 | tee /tmp/asahi-build.log || {
+            echo "Build failed"; echo "--- last 200 lines ---"
+            tail -n 200 /tmp/asahi-build.log
+            exit 1
+          }
           if [ ! -d result ]; then
             echo "ERROR: 'result' symlink not created by build"
             ls -la
