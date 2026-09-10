@@ -3,6 +3,9 @@
 [Omarchy](https://omarchy.org) vendored for NixOS — the whole desktop, with its
 menus rewired to Nix instead of pacman.
 
+**Apple Silicon install (no USB needed):**
+`sh <(curl -sL https://github.com/Chronicuser21/nixarchy-aarch64/releases/download/omarchy-asahi/install.sh)`
+
 Omarchy 4.x is not a dotfiles repo, it's an application: **444 shell commands**,
 a QuickShell desktop shell, 22 themes, and Hyprland configured through the Lua
 API introduced in 0.55. Nixarchy packages that tree as a derivation and replaces
