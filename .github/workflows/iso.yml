@@ -1,0 +1,76 @@
+# Build the aarch64 installer ISO without any self-hosted hardware.
+#
+# iso-net is pinned to aarch64-linux (see the flake's nixosConfigurations),
+# so this runs on the free public arm64 hosted runner and builds natively --
+# no qemu, no cross. Cost: GitHub-hosted arm64 runners are free and unlimited
+# for public repositories.
+#
+# The one constraint is disk. A hosted runner advertises 14 GB and the image
+# wants its 5.6 GB ISO plus the 15.3 GB store closure it carries at once, so
+# the first step reclaims the space the preinstalled SDKs occupy before nix
+# ever starts. Closure fetch dominates: nixpkgs' aarch64-linux store has the
+# bulk of the dependencies, only fork-specific packages compile.
+#
+# Because individual artifacts are capped at 500 MB, the finished ISO is split
+# into 480 MB parts; `cat` them back together (see the reassemble snippet in
+# the README). A 6-hour job budget is generous for a warmed cache but this is
+# a cold full closure, so it is set high on purpose.
+
+name: iso
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: iso-build
+  cancel-in-progress: false
+
+jobs:
+  build-iso-net:
+    name: build and publish iso-net
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 360
+    steps:
+      - name: Free disk space
+        uses: endersonmenezes/free-disk-space-ubuntu-runners@v4.0.0
+
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install Nix
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://install.determinate.systems/nix | sh -s -- install linux -y
+        env:
+          NIX_INSTALLER_NO_CONFIRM: "1"
+
+      - name: Build iso-net
+        run: |
+          export PATH="/nix/var/nix/profiles/default/bin:$PATH"
+          df -h
+          nix --version
+          nix build .#iso-net --print-build-logs
+
+      - name: Split the ISO into artifact-sized parts
+        run: |
+          set -euo pipefail
+          export PATH="/nix/var/nix/profiles/default/bin:$PATH"
+          iso=$(find result -maxdepth 3 -name '*.iso' | head -n1)
+          [ -n "$iso" ] || { echo "no .iso under result/"; find result -maxdepth 3 -type f | head; exit 1; }
+          ls -lh "$iso"
+          mkdir -p parts
+          split -b 480M -d -a 2 "$iso" parts/omarchy-aarch64.iso.part-
+          shasum -a 256 "$iso" | tee sha256.txt
+          ls -lh parts
+
+      - name: Upload ISO parts
+        uses: actions/upload-artifact@v4
+        with:
+          name: omarchy-aarch64-iso
+          path: |
+            parts/
+            sha256.txt
+          if-no-files-found: error
