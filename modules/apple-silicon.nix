@@ -30,4 +30,13 @@ inputs:
   # only knob this fork adds (most machines will also want the ASAHI kernel's
   # GPU stack, which the module wires up behind this flag).
   hardware.asahi.enable = lib.mkDefault true;
+
+  # Under U-Boot there IS no EFI variable store, and "write to it" is the one
+  # thing the bootloader's install step does by default. host.nix sets
+  # canTouchEfiVariables = true (plain, priority 100), so a lib.mkDefault false
+  # (priority 1000) would lose to it and systemd-boot-builder would fail at the
+  # bootsplash of the install. mkForce is the only honest answer: no machine
+  # that gets this module should ever write NVRAM, and there is no way for a
+  # generated host to say so at 100 and win.
+  boot.loader.efi.canTouchEfiVariables = lib.mkForce false;
 }

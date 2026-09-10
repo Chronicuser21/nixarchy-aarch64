@@ -21,12 +21,18 @@
     # everywhere the installer writes one. A machine that partitions
     # differently gets its own file here instead.
     (import ../../disk-config.nix {
-      # "whole" or "free". "free" means this machine was installed beside
-      # another operating system: it describes two partitions by label and no
-      # partition table at all, so disko can never rebuild the table from it.
+      # "whole", "free" or "existing". "free" means this machine was installed
+      # beside another operating system: it describes two partitions by label
+      # and no partition table at all, so disko can never rebuild the table
+      # from it. "existing" is the Apple Silicon dual boot: it adopts the two
+      # partitions the Asahi installer already made (device = the Linux root,
+      # esp = the dedicated ESP) and again describes no partition table.
       # Read the header of ../../disk-config.nix before assuming otherwise.
       mode = "@diskmode@";
       device = "@device@";
+      # Only meaningfully substituted for mode = "existing"; the other modes
+      # ignore it.
+      esp = "@espdevice@";
       # Quoted deliberately: the bare token is not valid Nix -- the file would
       # not parse, let alone format -- so the installer substitutes the quotes
       # away along with it. The autologin flag in configuration.nix is quoted

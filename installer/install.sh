@@ -117,11 +117,15 @@ from_host_exists=false
 # variable three functions later.
 device=""
 encrypt=""
-# "whole" (the disk is ours) or "free" (installed beside an existing OS, #47).
-# Set by ask_disk_mode or the answers file; the free-space region it applies to
-# lives in free_start/free_end, in sectors, and is measured twice -- once to
-# decide whether to offer the mode, once immediately before cutting.
+# "whole" (the disk is ours), "free" (installed beside an existing OS, #47),
+# or "existing" (Apple Silicon dual boot: installed into the Linux root
+# partition the Asahi installer already made, adopting its dedicated ESP).
+# Set by ask_disk_mode or the answers file; the free-space region the middle
+# mode applies to lives in free_start/free_end, in sectors, and is measured
+# twice -- once to decide whether to offer the mode, once immediately before
+# cutting. The ESP the last mode adopts is `esp`.
 disk_mode="whole"
+esp=""
 free_start=""
 free_end=""
 free_why=""
@@ -170,10 +174,15 @@ configuration becomes a starting point for yours.
 
 The answers file is one key=value per line, # for comments, no quoting:
 
-  device=/dev/vda           whole disk, not a partition
-  disk_mode=whole           whole or free; default whole. `free` installs into
-                            the largest free region on the disk and leaves
-                            every existing partition alone
+  device=/dev/vda           whole disk (whole) or the existing Linux root
+                            partition (existing), e.g. /dev/nvme0n1p5
+  disk_mode=whole           whole, free or existing; default whole. `free`
+                            installs into the largest free region on the disk
+                            and leaves every existing partition alone.
+                            `existing` is Apple Silicon dual boot: it installs
+                            into device and adopts the ESP named by esp
+  esp=/dev/nvme0n1p4        required when disk_mode=existing: the dedicated
+                            ESP set up by the Asahi installer
   encrypt=yes               yes or no
   luks_passphrase=...       required when encrypt=yes
   hostname=nixarchy
@@ -956,12 +965,101 @@ free_region_human() {
   numfmt --to=iec-i --suffix=B $(((free_end - free_start + 1) * sector_bytes))
 }
 
+# ---------------------------------------------------------------------------
+# Existing partitions, Apple Silicon dual boot (#453)
+#
+# The layout the Linux-on-Apple-Silicon installer leaves behind: a dedicated
+# EFI system partition (EF00) and a Linux root partition (8300), cut by the
+# Asahi installer into the internal NVMe between the macOS containers -- and a
+# U-Boot that loads the peripheral firmware (Wi-Fi, webcam) from that very ESP
+# every boot. So the two partitions are not "some partitions": they are the
+# only place this Mac will boot Linux from, on a table shared with macOS,
+# where a single mistake costs the whole Mac.
+#
+# The rules follow from that, the same way the free-space mode's follow from
+# Windows:
+#
+#   Nothing here writes to the partition table, or to any partition it did
+#   not name. The table and every macOS partition are as the Asahi installer
+#   left them; disko sees only the Linux root, and even the ESP is adopted
+#   rather than reformatted (vendorfw lives on it).
+#
+#   "Which ESP" is a firmware question and is answered by firmware. m1n1
+#   records the partition it bootstraps this OS from in the device tree; this
+#   does not guess at it by GPT type, which could match the wrong ESP.
+#
+#   The Linux root has to be findable and single. Read-only detection, run
+#   twice like the free-space measurement: once to offer the mode, once inside
+#   format_disk, and the two must agree.
+# ---------------------------------------------------------------------------
+
+# Sets ESP_DT when this machine was booted by Linux-on-Apple-Silicon firmware,
+# to the device-tree path of the ESP that firmware booted (chosen node
+# asahi,efi-system-partition, a null-terminated property). Empty otherwise.
+asahi_esp_property() {
+  tr -d '\000' < /proc/device-tree/chosen/asahi,efi-system-partition 2>/dev/null
+}
+
+# Sets asahi_disk/asahi_root/asahi_esp when this machine presents the case
+# disk_mode=existing exists for: Apple Silicon hardware, booted by its own
+# firmware, carrying a dedicated ESP and exactly ONE Linux-type partition on
+# the same disk. Refuses -- returns non-zero, writes nothing -- on anything
+# else, including more than one Linux partition, which keeps this from ever
+# guessing which of several is "the" root.
+latest_asahi_layout() {
+  local prop esp_dev disk root_name parent
+  asahi_disk=""
+  asahi_root=""
+  asahi_esp=""
+
+  prop=$(asahi_esp_property) || return 1
+  [ -n "$prop" ] || return 1
+
+  esp_dev=$(readlink -f "$prop" 2>/dev/null) || return 1
+  [ "$(lsblk -dno TYPE "$esp_dev" 2>/dev/null)" = part ] || return 1
+  asahi_esp=$esp_dev
+
+  disk=$(lsblk -no PKNAME "$esp_dev" 2>/dev/null)
+  [ -n "$disk" ] || return 1
+  asahi_disk=/dev/$disk
+
+  # GPT types for Linux filesystem and Linux LUKS (decrypted LUKS still sits
+  # in its typed partition). Exactly one candidate, as a PATH not a name.
+  local candidates=()
+  while read -r root_name; do
+    [ -n "$root_name" ] || continue
+    candidates+=("$root_name")
+  done < <(lsblk -ln -o NAME,PARTTYPE "$asahi_disk" 2>/dev/null |
+    awk '$2=="0FC63DAF-8483-4772-8E79-3D69D8477DE4" || $2=="CA7D7CCB-63ED-4C53-861C-1742536059CC" {print $1}')
+  [ "${#candidates[@]}" -eq 1 ] || return 1
+  root_name=${candidates[0]}
+
+  # Never the partition this installer booted from.
+  parent=$(lsblk -no PKNAME "/dev/$root_name" 2>/dev/null) || parent=""
+  [ -n "$parent" ] && [ "/dev/$parent" != "$(boot_medium)" ] || return 1
+
+  asahi_root=$(readlink -f "/dev/$root_name")
+  return 0
+}
+
 # Full disk or free space. Skipped entirely -- not shown greyed out, not shown
 # with one option -- when the disk cannot take a free-space install, which is
 # upstream's shape and is also the only version of this screen that cannot be
 # answered wrongly.
 ask_disk_mode() {
-  if ! free_space_possible "$device"; then
+  # The Apple Silicon case first, because it is detected on its own and this
+  # screen then has to talk about a whole disk that is not necessarily the
+  # one it was asked about: the two partitions the firmware will boot live on
+  # $asahi_disk, whatever was chosen above.
+  local free_ok=no dual_ok=no choices=()
+  if free_space_possible "$device"; then
+    free_ok=yes
+  fi
+  if latest_asahi_layout; then
+    dual_ok=yes
+  fi
+
+  if [ "$free_ok" = no ] && [ "$dual_ok" = no ]; then
     disk_mode=whole
     return 0
   fi
@@ -973,12 +1071,25 @@ ask_disk_mode() {
   lsblk -no NAME,SIZE,FSTYPE,LABEL "$device" 2>/dev/null | head -12 | ui_indent
   echo
 
+  if [ "$dual_ok" = yes ]; then
+    choices+=("Apple Silicon dual boot -- install into the Linux partition on $asahi_disk, using the ESP the Asahi installer made")
+  fi
+  if [ "$free_ok" = yes ]; then
+    choices+=("Free space install -- keep what is on $device, use the $(free_region_human) free")
+  fi
+  choices+=("Full disk install -- erase $device and everything on it")
+
   local choice
-  choice=$(printf '%s\n' \
-    "Free space install -- keep what is on $device, use the $(free_region_human) free" \
-    "Full disk install -- erase $device and everything on it" |
-    gum choose --height "$(ui_widget_height)" --padding "$(ui_gum_pad)" --header "How should nixarchy use $device?") || choice=""
+  choice=$(printf '%s\n' "${choices[@]}" |
+    gum choose --height "$(ui_widget_height)" --padding "$(ui_gum_pad)" --header "How should nixarchy use the disk?") || choice=""
   case $choice in
+    "Apple Silicon dual boot"*)
+      disk_mode=existing
+      # The detected partitions replace whatever disk was picked above: the
+      # mode installs into $asahi_root, not the whole disk.
+      device=$asahi_root
+      esp=$asahi_esp
+      ;;
     "Free space install"*) disk_mode=free ;;
     "Full disk install"*) disk_mode=whole ;;
     # Escape, or a gum that could not draw. Neither is consent to format a
@@ -998,6 +1109,10 @@ ask_encrypt() {
   if [ "$disk_mode" = free ]; then
     ui_left "\e[33m$(free_region_human) of free space on $device will be overwritten.\e[0m"
     ui_left "\e[33mThe partitions already on $device are not touched.\e[0m"
+  elif [ "$disk_mode" = existing ]; then
+    ui_left "\e[33mThe Linux partition $device will be reformatted.\e[0m"
+    ui_left "\e[33mThe ESP $esp is adopted for /boot, not reformatted.\e[0m"
+    ui_left "\e[33mNo other partition is touched and the partition table never moves.\e[0m"
   else
     ui_left "\e[33mEverything on $device will be overwritten. There is no recovery possible.\e[0m"
   fi
@@ -1010,6 +1125,7 @@ ask_encrypt() {
   local rc=0
   local where=$device
   [ "$disk_mode" = free ] && where="the free space on $device"
+  [ "$disk_mode" = existing ] && where="$device"
   gum confirm --padding "$(ui_gum_pad)" "Encrypt and install to $where?" || rc=$?
   case $rc in
     0) encrypt=true ;;
@@ -1033,7 +1149,10 @@ confirm_summary() {
     printf 'Timezone,%s\n' "$timezone"
     printf 'Keyboard,%s\n' "$keymap"
     printf 'Disk,%s\n' "$device"
-    if [ "$disk_mode" = free ]; then
+    if [ "$disk_mode" = existing ]; then
+      printf 'Disk use,existing Linux partition -- other partitions and the table untouched\n'
+      printf 'Boot,%s (adopted, not reformatted)\n' "$esp"
+    elif [ "$disk_mode" = free ]; then
       printf 'Disk use,free space only (%s)\n' "$(free_region_human)"
     else
       printf 'Disk use,the whole disk -- erased\n'
@@ -1125,6 +1244,7 @@ read_answers() {
     case $key in
       device) device=$value ;;
       disk_mode) disk_mode=$value ;;
+      esp) esp=$value ;;
       encrypt) encrypt=$value ;;
       luks_passphrase) luks_passphrase=$value ;;
       hostname) hostname=$value ;;
@@ -1192,6 +1312,13 @@ validate_answers() {
   if [ -n "$device" ]; then
     if [ ! -b "$device" ]; then
       problems+=("device: $device is not a block device")
+    elif [ "$disk_mode" = existing ]; then
+      # The existing mode installs INTO a partition somebody already made --
+      # whole-disk here would format $esp's neighbour as though it were the
+      # disk, which is precisely what the mode exists not to do.
+      if [ "$(lsblk -dno TYPE "$device" 2>/dev/null)" != "part" ]; then
+        problems+=("device: $disk_mode installs into a partition, not a whole disk -- e.g. /dev/nvme0n1p5")
+      fi
     elif [ "$(lsblk -dno TYPE "$device" 2>/dev/null)" != "disk" ]; then
       # A partition here would be formatted as though it were the whole disk.
       problems+=("device: $device is not a whole disk")
@@ -1209,11 +1336,25 @@ validate_answers() {
   # to the whole-disk mode. Falling back would silently erase the very disk the
   # file asked to preserve, which is the worst failure this script has.
   case $disk_mode in
-    whole | free) ;;
-    *) problems+=("disk_mode: must be whole or free, got: $disk_mode") ;;
+    whole | free | existing) ;;
+    *) problems+=("disk_mode: must be whole, free or existing, got: $disk_mode") ;;
   esac
   if [ "$disk_mode" = free ] && [ -n "$device" ] && [ -b "$device" ]; then
     free_space_possible "$device" || problems+=("disk_mode: free is not possible here: $free_why")
+  fi
+  if [ "$disk_mode" = existing ]; then
+    # The ESP this mode adopts holds the Apple Silicon peripheral firmware
+    # (vendorfw); it must be a partition the machine already has, and it must
+    # not be the root it would be mounting over.
+    if [ -z "$esp" ]; then
+      problems+=("esp: required when disk_mode=existing (the dedicated ESP the Asahi installer made, e.g. /dev/nvme0n1p4)")
+    elif [ ! -b "$esp" ]; then
+      problems+=("esp: not a block device: $esp")
+    elif [ "$esp" = "$device" ]; then
+      problems+=("esp: must differ from device")
+    elif [ "$(lsblk -dno TYPE "$esp" 2>/dev/null)" != "part" ]; then
+      problems+=("esp: not a partition: $esp")
+    fi
   fi
   if [ "$encrypt" = yes ] && [ -z "$luks_passphrase" ]; then
     problems+=("luks_passphrase: required when encrypt=yes")
@@ -1289,6 +1430,7 @@ substitute_host_files() {
     subst "$f" '@hostname@' "$hostname"
     subst "$f" '@username@' "$username"
     subst "$f" '@device@' "$device"
+    subst "$f" '@espdevice@' "$esp"
     subst "$f" '@diskmode@' "$disk_mode"
     # Quoted in the template, like @encrypt@: the bare token is not
     # parseable Nix. The value replaces the token AND its quotes.
@@ -1553,6 +1695,34 @@ format_disk() {
     partition_free_space
   fi
 
+  if [ "$disk_mode" = existing ]; then
+    # Measured a second time, immediately before writing, and it has to agree
+    # with what the question screen saw -- the same pact the free-space mode
+    # keeps for its region. Between the two, a disk can be unplugged or a
+    # partition table edited, and the sectors somebody consented to format
+    # would belong to a different machine.
+    latest_asahi_layout || {
+      echo "nixarchy-install: the Apple Silicon layout is no longer detectable." >&2
+      echo "  Nothing was written. Start again." >&2
+      return 1
+    }
+    if [ "$(readlink -f "$device" 2>/dev/null)" != "$asahi_root" ] ||
+      [ "$(readlink -f "$esp" 2>/dev/null)" != "$asahi_esp" ]; then
+      echo "nixarchy-install: the detected partitions changed since the question" >&2
+      echo "  (was $(readlink -f "$device" 2>/dev/null)/$(readlink -f "$esp" 2>/dev/null)," >&2
+      echo "  now $asahi_root/$asahi_esp). Nothing was written. Start again." >&2
+      return 1
+    fi
+
+    # Same stale-signature reasoning as partition_free_space's wipefs, applied
+    # to the ONE partition this mode is allowed to format: the previous owner
+    # of this 8300 partition left a filesystem in it, and disko's _create
+    # steps skip devices blkid already recognises -- which would mount and
+    # write over whatever was there, silently. The ESP is not in this wipe
+    # for the reason whose comment lives in disk-config.nix mode = "existing".
+    wipefs -a "$device"
+  fi
+
   # The passphrase file disko's passwordFile points at. Written with umask 077,
   # removed as soon as the format is done; it never reaches the installed
   # system, whose initrd prompts instead.
@@ -1587,6 +1757,20 @@ format_disk() {
     echo "nixarchy-install: disko exited $rc; the disk may be partly formatted." >&2
     echo "  Nothing was installed. This is disko failing, not the bootloader." >&2
     return 1
+  fi
+
+  if [ "$disk_mode" = existing ]; then
+    # disko did not mount the adopted ESP, by design: it is not in the disko
+    # layout, precisely so that disko can never write to it (see disk-config.nix
+    # mode = "existing"). Mount it here, by the path the firmware named, so
+    # verify_subvolume_mounts finds it next -- and the bootloader, later, has a
+    # place to install the EFI/ directory it owns.
+    mkdir -p /mnt/boot
+    mount -t vfat -o umask=0077 "$esp" /mnt/boot || {
+      echo "nixarchy-install: could not mount the adopted ESP $esp at /mnt/boot." >&2
+      echo "  The root partition is formatted; the ESP was not touched." >&2
+      return 1
+    }
   fi
 }
 

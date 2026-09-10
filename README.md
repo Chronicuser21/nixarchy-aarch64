@@ -1162,6 +1162,23 @@ Arch Linux machine that has it):
 2. **Phase-1 style** — boot any aarch64 NixOS live image through the same
    U-Boot, then `nix run github:Chronicuser21/nixarchy-aarch64#install`.
 
+Whichever road, the installer detects the layout the Asahi installer left —
+the dedicated ESP and the one Linux partition (GPT 8300/8309, typically
+`/dev/nvme0n1p5`) sandwiched between the macOS containers — and offers
+**Apple Silicon dual boot**: it formats only that root partition and adopts
+the ESP without reformatting it (the Wi-Fi/webcam firmware lives there). macOS
+and the partition table are never touched. See
+[the dual boot page](docs/manual/dual-boot-install.md).
+
+When the ISO boots through U-Boot it can wait on
+`A start job is running for /dev/disk/by-label/NIXARCHY_*_AARCH64...`. Two rules
+from the nixos-hardware guide apply verbatim: write the image with **`dd` to the
+whole device** (never a partition), and **if you are already 30 seconds in,
+replug the stick** — the image force-loads the USB stack in its initrd up front
+to make the probe happen at boot rather than on demand, but a drive that has
+genuinely dropped off the bus still has to be replugged. If USB boot will not
+cooperate, road 2 needs no boot medium at all.
+
 What the installer writes to the target must add the Apple-Silicon plumbing
 the ISO does not carry. This fork ships it as `nixosModules.appleSilicon`
 (importing `nixos-apple-silicon`'s `apple-silicon-support`, whose kernel,

@@ -4,14 +4,75 @@ title: Dual boot install
 
 # Dual boot install
 
-The nixarchy installer offers two disk modes, the way Omarchy's does:
+The nixarchy installer offers three disk modes, the way Omarchy's does two:
 
 - **Full disk install** — the disk is nixarchy's, and everything on it is gone.
 - **Free space install** — nixarchy goes into the largest unpartitioned region
   on the disk, and every partition already there is left exactly as it was.
+- **Apple Silicon dual boot** — on a Mac the Asahi installer already made the
+  partitions; nixarchy installs into them, and macOS is left exactly as it was.
 
-The second screen only appears when it can. On a disk with no partitions there
-is nothing to install beside, so the question is not asked at all.
+The mode screen only appears when it can. On a disk with no existing operating
+system there is nothing to install beside, so the question is not asked at all.
+
+## Apple Silicon (Macs)
+
+The free-space path below is about Windows, and none of its preparation applies
+to a Mac: the partitioning was already done by the
+[Asahi Linux installer](https://asahilinux.org/install/), which set up a
+dedicated EFI system partition and a Linux root partition on the internal NVMe
+between the macOS containers. The Apple Silicon version of this installer
+detects exactly that layout and offers *Apple Silicon dual boot*.
+
+What it does:
+
+1. Reads the partition the firmware itself records booting Linux from
+   (`asahi,efi-system-partition` in the device tree) — it does not guess which
+   ESP is "the" one by partition type.
+2. Looks on that same disk for the single Linux partition the Asahi installer
+   left (GPT type 8300, or 8309 once encrypted). More than one, or none, and
+   the mode is not offered.
+3. Formats **only that root partition** and installs into it. macOS, the
+   partition table, and every partition that is not the root are untouched.
+
+What it does not do:
+
+**It does not reformat the ESP.** The Asahi installer stores the peripheral
+firmware — Wi-Fi, webcam — in `vendorfw/` on the ESP, and loads it from there
+every boot. Reformatting it would cost you the hardware, so nixarchy adopts it
+as-is: the installer mounts it for the bootloader, and that is all.
+
+**It does not touch the partition table.** The `disk-config.nix` it writes
+describes no partition table and names only the two partitions the firmware
+boots from — the same "disko never reaches a partition nixarchy did not
+create" promise the free-space mode makes, at the cost that the file cannot
+rebuild the disk. Running disko against it on a wiped disk produces nothing.
+
+**It does not add macOS to the boot menu.** You hold the power button (or
+Option at boot) to get firmware's chooser, the same way you boot the installer
+— macOS's own boot entry is untouched.
+
+### The two boots of the installer ISO
+
+The ISO on Apple Silicon still boots through the m1n1/U-Boot the Asahi
+installer put on the box. Two things to know from the nixos-hardware guide that
+apply verbatim:
+
+1. **`dd` the ISO to the whole device** — `/dev/diskX`, never a partition, and
+   nothing but `dd`. When the label is wrong, the boot waits on
+   `A start job is running for /dev/disk/by-label/NIXARCHY_*_AARCH64...`.
+2. **If you are already waiting 30 seconds, replug the USB stick.** This is a
+   known quirk of certain flash drives on this hardware, not an installer bug;
+   the image force-loads the USB stack in its initrd up front to make the probe
+   happen at boot rather than on demand, but a stick that genuinely drops off
+   the bus still has to be replugged.
+
+If USB boot will not cooperate at all, the installer's other road is the
+phase-1 style command from any aarch64 Linux, which needs no boot medium:
+
+```
+nix run github:Chronicuser21/nixarchy-aarch64#install
+```
 
 ## Before you start
 

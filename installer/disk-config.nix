@@ -3,18 +3,27 @@
 # invariant 1 applied to the disk: text in the user's flake, not a side effect
 # of an install script.
 #
-# Two modes, one file, one btrfs layout. `mode` picks between them:
+# Three modes, one file, one btrfs layout. `mode` picks between them:
 #
-#   "whole"  the whole disk. `device` is the disk, disko owns the partition
-#            table, and everything that was on it is gone.
+#   "whole"    the whole disk. `device` is the disk, disko owns the partition
+#              table, and everything that was on it is gone.
 #
-#   "free"   installed into free space beside an existing OS (#47). There is
-#            NO partition table here at all -- see the block below for why
-#            that is the safety property and not an omission.
+#   "free"     installed into free space beside an existing OS (#47). There is
+#              NO partition table here at all -- see the block below for why
+#              that is the safety property and not an omission.
+#
+#   "existing" installed into a partition that already exists, beside an
+#              operating system whose partition table must not move -- the
+#              Apple Silicon dual-boot case (#453). `device` is the existing
+#              Linux root partition (e.g. /dev/nvme0n1p5), `esp` the dedicated
+#              ESP the firmware set up for this OS (e.g. /dev/nvme0n1p4).
+#              Again there is NO partition table, and the ESP is adopted
+#              without being reformatted -- see the block below.
 {
   device,
   encrypt ? true,
   mode ? "whole",
+  esp ? "/dev/disk/by-partlabel/nixarchy-esp",
 }:
 let
   # Omarchy's layout on Arch is @ @home @log and @pkg for pacman's cache.
@@ -210,10 +219,58 @@ let
       };
     };
   };
+
+  # ---------------------------------------------------------------------------
+  # mode = "existing" -- a partition somebody (or the Asahi installer) already
+  # made, on a disk whose table must not move.
+  #
+  # This is the Apple Silicon dual boot: the Asahi installer leaves a
+  # dedicated EFI system partition (EF00, "EFI - NIXOS") and a Linux root
+  # partition (8300, typically /dev/nvme0n1p5) on the internal NVMe, between
+  # the macOS containers. m1n1/U-Boot discovers THIS machine by that ESP, so
+  # installing "beside" macOS means installing INTO those two partitions --
+  # not cutting new ones, and not touching the partition table at all.
+  #
+  # Like `free`, this file therefore describes no partition table. disko sees
+  # exactly one disk: the root partition already named, which is the only
+  # partition this mode ever formats. Nothing else on the disk can be reached:
+  # `whole`-mode's relabel-retry hazard (details in `free` above) cannot
+  # happen because no `gpt` block exists to run it.
+  #
+  # The ESP is deliberately NOT given to disko, and that is a vendorfw
+  # decision. The Asahi installer stores the peripheral firmware
+  # (Wi-Fi, webcam, ...) in `vendorfw/` on that ESP, and the Apple Silicon
+  # support module loads it from there by default (nixos-apple-silicon's
+  # uefi-standalone guide). Formatting it would cost the hardware. So it is
+  # adopted as-is: a plain `fileSystems` entry (disko never formats it), and
+  # the installer mounts it at /mnt/boot before installing. What IS written
+  # to it, by the bootloader at activation time, is the EFI/ directory
+  # NixOS's own systemd-boot needs.
+  #
+  # `esp` defaults to the partlabel the free-space mode uses; existing-mode
+  # installs always supply it explicitly (install.sh reads it from the
+  # firmware's own asahi,efi-system-partition chosen node).
+  existing = {
+    disko.devices.disk.root = {
+      inherit device;
+      content = luksOr btrfs;
+    };
+
+    # Adopted, never formatted (see above). Kept out of `disko.devices` so
+    # `whole`'s "a partition we did not create is never written to" promise
+    # stays literally true here too.
+    fileSystems."/boot" = {
+      device = esp;
+      fsType = "vfat";
+      options = [ "umask=0077" ];
+    };
+  };
 in
 if mode == "whole" then
   whole
 else if mode == "free" then
   free
+else if mode == "existing" then
+  existing
 else
-  throw "disk-config.nix: mode must be \"whole\" or \"free\", got: ${mode}"
+  throw "disk-config.nix: mode must be \"whole\", \"free\" or \"existing\", got: ${mode}"

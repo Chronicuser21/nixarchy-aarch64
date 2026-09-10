@@ -457,10 +457,32 @@ in
   # Real hardware usually binds i915/amdgpu/nouveau on its own; a VM needs to
   # be told. These are cheap to carry and do nothing on a machine that has
   # already sorted itself out.
-  boot.initrd.kernelModules = [
-    "virtio_gpu"
-    "bochs"
-  ];
+  boot.initrd.kernelModules =
+    [
+      "virtio_gpu"
+      "bochs"
+    ]
+    ++ lib.optionals pkgs.stdenv.hostPlatform.isAarch64 [
+      # The AArch64 image's boot medium is USB through a font-sized number of
+      # controllers (xhci/ehci reach the stick on every Apple Silicon gen), and
+      # the initrd has to enumerate it BEFORE systemd starts waiting on the
+      # /iso device -- the A start job is running for
+      # /dev/disk/by-label/NIXARCHY_*_AARCH64 unit. Stock initrds load the USB
+      # stack on demand, and "on demand" races the device unit: the job is
+      # printed, the probe quietly never re-runs, and the machine waits on the
+      # by-label of a stick that has already been dropped. Forcing the stack in
+      # up front makes the probe happen at boot instead of on demand, and it is
+      # exactly the module list udev would load anyway -- no new code, just
+      # earlier. It stays aarch64-only because x86_64 images have no such
+      # wait (nixos.org/devices#apple-silicon documents the same stick on the
+      # same hardware: if the label never appears, dd the image to the whole
+      # device and replug after 30 s).
+      "xhci_pci"
+      "ehci_pci"
+      "ohci_pci"
+      "usb-storage"
+      "uas"
+    ];
 
   # The installer owns tty1.
   #
