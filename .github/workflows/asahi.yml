@@ -85,3 +85,4 @@ sh <(curl -sL https://github.com/$GITHUB_REPOSITORY/releases/download/omarchy-as
         run: |
           echo "One-command install (run from macOS):"
           echo "  sh <(curl -sL https://github.com/$GITHUB_REPOSITORY/releases/download/omarchy-asahi/install.sh)"
+# re-register workflow after repo rename
