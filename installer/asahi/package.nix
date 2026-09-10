@@ -73,7 +73,7 @@ stdenv.mkDerivation (finalAttrs: {
   '';
 
   meta = {
-    homepage = "https://github.com/Chronicuser21/NixOmarchy-aarch64";
+    homepage = "https://github.com/Chronicuser21/nixarchy-aarch64";
     platforms = [ "aarch64-linux" ];
     licence = lib.licenses.mit;
   };

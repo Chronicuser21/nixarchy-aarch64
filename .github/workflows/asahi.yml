@@ -2,7 +2,7 @@
 # release assets under the fixed tag `omarchy-asahi`, which is what
 # installer/asahi/install.sh points at:
 #
-#   sh <(curl -sL https://github.com/Chronicuser21/NixOmarchy-aarch64/releases/download/omarchy-asahi/install.sh)
+#   sh <(curl -sL https://github.com/Chronicuser21/nixarchy-aarch64/releases/download/omarchy-asahi/install.sh)
 #
 # The package (zip + installer_data.json, from `nix build .#asahi-installer`)
 # is a whole-disk NixOS image split into an ESP and root partition the stock

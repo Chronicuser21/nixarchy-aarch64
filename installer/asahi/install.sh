@@ -7,7 +7,7 @@
 #
 # Run it from macOS:
 #
-#   sh <(curl -sL https://github.com/Chronicuser21/NixOmarchy-aarch64/releases/download/omarchy-asahi/install.sh)
+#   sh <(curl -sL https://github.com/Chronicuser21/nixarchy-aarch64/releases/download/omarchy-asahi/install.sh)
 #
 # It installs the omarchy-asahi NixOS image the way the Asahi installer lays
 # down any other distro: macOS is resized, the image is written to its own
@@ -38,8 +38,8 @@ if true; then
 
   export VERSION_FLAG=https://cdn.asahilinux.org/installer/latest
   export INSTALLER_BASE=https://cdn.asahilinux.org/installer
-  export INSTALLER_DATA=https://github.com/Chronicuser21/NixOmarchy-aarch64/releases/download/omarchy-asahi/installer_data.json
-  export REPO_BASE=https://github.com/Chronicuser21/NixOmarchy-aarch64/releases/download/omarchy-asahi
+  export INSTALLER_DATA=https://github.com/Chronicuser21/nixarchy-aarch64/releases/download/omarchy-asahi/installer_data.json
+  export REPO_BASE=https://github.com/Chronicuser21/nixarchy-aarch64/releases/download/omarchy-asahi
 
   TMP=/tmp/asahi-install
 

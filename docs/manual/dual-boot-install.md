@@ -71,7 +71,7 @@ If USB boot will not cooperate at all, the installer's other road is the
 phase-1 style command from any aarch64 Linux, which needs no boot medium:
 
 ```
-nix run github:Chronicuser21/NixOmarchy-aarch64#install
+nix run github:Chronicuser21/nixarchy-aarch64#install
 ```
 
 ## Before you start

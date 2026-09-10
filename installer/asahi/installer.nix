@@ -53,7 +53,7 @@ let
         lib
         version
         ;
-      baseUrl = "https://github.com/Chronicuser21/NixOmarchy-aarch64/releases/download/omarchy-asahi";
+      baseUrl = "https://github.com/Chronicuser21/nixarchy-aarch64/releases/download/omarchy-asahi";
     };
 in
 {
