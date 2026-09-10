@@ -1160,7 +1160,7 @@ Arch Linux machine that has it):
 1. **Boot the ISO** — write `result/iso/*.iso` to USB (or SD) and let the
    existing U-Boot's UEFI boot it, then run the normal installer.
 2. **Phase-1 style** — boot any aarch64 NixOS live image through the same
-   U-Boot, then `nix run github:Chronicuser21/nixarchy-aarch64#install`.
+   U-Boot, then `nix run github:Chronicuser21/NixOmarchy-aarch64#install`.
 3. **No USB at all** — the image-based installer below, driven from macOS.
 
 Whichever road, the installer detects the layout the Asahi installer left —
@@ -1208,7 +1208,7 @@ published to release assets under the fixed tag `omarchy-asahi`, it installs
 with a single command from macOS:
 
 ```
-sh <(curl -sL https://github.com/Chronicuser21/nixarchy-aarch64/releases/download/omarchy-asahi/install.sh)
+sh <(curl -sL https://github.com/Chronicuser21/NixOmarchy-aarch64/releases/download/omarchy-asahi/install.sh)
 ```
 
 What you get, and where it differs from roads 1/2:
