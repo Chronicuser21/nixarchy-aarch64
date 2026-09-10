@@ -36,7 +36,7 @@ jobs:
     timeout-minutes: 360
     steps:
       - name: Free disk space
-        uses: endersonmenezes/free-disk-space-ubuntu-runners@v4.0.0
+        uses: endersonmenezes/free-disk-space@v4.0.0
 
       - name: Checkout
         uses: actions/checkout@v5
