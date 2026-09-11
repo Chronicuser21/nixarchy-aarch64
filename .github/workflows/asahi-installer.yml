@@ -85,13 +85,16 @@ jobs:
           done
           # Refresh every run: the assets keep their names, so a fixed-tag
           # clobber is enough -- the bootstrap only reads and names the same
-          # files each time.
+          # files each time. The asahi installer fetches installer_data.json
+          # under that exact name, so publish the versioned file again as the
+          # fixed name next to the versioned one.
+          cp "$data" installer_data.json
           gh release view omarchy-asahi --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
             || gh release create omarchy-asahi --repo "$GITHUB_REPOSITORY" \
               --title "omarchy-asahi (Apple Silicon, macOS-side installer)" \
               --notes "No-USB Apple Silicon install. Run from macOS: sh <(curl -sL https://github.com/$GITHUB_REPOSITORY/releases/download/omarchy-asahi/install.sh)"
           gh release upload omarchy-asahi --repo "$GITHUB_REPOSITORY" --clobber \
-            "$zip" "$data" installer/asahi/install.sh
+            "$zip" "$data" installer_data.json installer/asahi/install.sh
 
       - name: Summary
         run: |
