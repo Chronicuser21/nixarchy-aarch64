@@ -103,18 +103,24 @@ in
     inputs.apple-silicon.nixosModules.apple-silicon-support
   ];
 
-  system.extraDependencies = inputSources;
+  system = {
+    # Every locked input, transitively, so a fully offline
+    # nixos-rebuild switch works against /etc/nixos' flake.
+    extraDependencies = inputSources;
 
-  system.build.asahi-image = import ./make-disk-image.nix {
-    copyConfig = etcConfig;
-    memSize = 8192;
-    inherit
-      config
-      fsType
-      lib
-      pkgs
-      version
-      ;
+    build.asahi-image = import ./make-disk-image.nix {
+      copyConfig = etcConfig;
+      memSize = 8192;
+      inherit
+        config
+        fsType
+        lib
+        pkgs
+        version
+        ;
+    };
+
+    stateVersion = "25.05";
   };
 
   boot = {
@@ -273,5 +279,4 @@ in
 
   users.mutableUsers = true;
 
-  system.stateVersion = "25.05";
 }
