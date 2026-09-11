@@ -17,7 +17,12 @@ let
   partInfo = import (image + "/partinfo.nix");
 
   installerData = generateInstallerData {
-    inherit baseUrl lib partInfo version;
+    inherit
+      baseUrl
+      lib
+      partInfo
+      version
+      ;
   };
 in
 
