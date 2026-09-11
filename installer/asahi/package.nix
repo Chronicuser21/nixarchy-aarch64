@@ -13,11 +13,11 @@
 }:
 
 let
-  generateInstallerData = import ./generate-installer-data.nix { inherit lib; };
+  generateInstallerData = import ./generate-installer-data.nix;
   partInfo = import (image + "/partinfo.nix");
 
   installerData = generateInstallerData {
-    inherit baseUrl partInfo version;
+    inherit baseUrl lib partInfo version;
   };
 in
 
