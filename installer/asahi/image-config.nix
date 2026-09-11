@@ -8,14 +8,105 @@
   version,
   ...
 }:
+let
+  # Every locked input, transitively, as a store path.
+  collectInputs =
+    flake: [ flake.outPath ] ++ lib.concatMap collectInputs (lib.attrValues (flake.inputs or { }));
+  inputSources = lib.unique (collectInputs inputs.self);
+
+  # Generate /etc/nixos/flake.nix for the installed machine.
+  # Declares every input the parent flake locks, so nixos-rebuild
+  # switch works fully offline from the store.
+  etcFlakeNix = pkgs.writeText "flake.nix" ''
+    {
+      inputs = {
+        nixpkgs.url = "github:NixOS/nixpkgs/${inputs.nixpkgs.rev}";
+        apple-silicon = {
+          url = "github:nix-community/nixos-apple-silicon/${inputs.apple-silicon.rev}";
+          inputs.nixpkgs.follows = "nixpkgs";
+        };
+        home-manager = {
+          url = "github:nix-community/home-manager/${inputs.home-manager.rev}";
+          inputs.nixpkgs.follows = "nixpkgs";
+        };
+        hyprland.url = "github:hyprwm/Hyprland/${inputs.hyprland.rev}";
+        disko = {
+          url = "github:nix-community/disko/${inputs.disko.rev}";
+          inputs.nixpkgs.follows = "nixpkgs";
+        };
+        nixos-hardware = {
+          url = "github:NixOS/nixos-hardware/${inputs.nixos-hardware.rev}";
+          inputs.nixpkgs.follows = "nixpkgs";
+        };
+        nix-flatpak.url = "github:gmodena/nix-flatpak/${inputs.nix-flatpak.rev}";
+        sops-nix = {
+          url = "github:Mic92/sops-nix/${inputs.sops-nix.rev}";
+          inputs.nixpkgs.follows = "nixpkgs";
+        };
+        omarchy = {
+          url = "github:basecamp/omarchy/${inputs.omarchy.rev}";
+          flake = false;
+        };
+        systems.url = "github:nix-systems/default-linux";
+        zen-browser = {
+          url = "github:0xc000022070/zen-browser-flake/${inputs.zen-browser.rev}";
+          inputs.nixpkgs.follows = "nixpkgs";
+        };
+        hypr-rdp = {
+          url = "github:MuNeNiCK/hypr-rdp/${inputs.hypr-rdp.rev}";
+          inputs.nixpkgs.follows = "nixpkgs";
+        };
+        nixi = {
+          url = "github:olafkfreund/nixi-nixarchy/${inputs.nixi.rev}";
+          inputs.nixpkgs.follows = "nixpkgs";
+        };
+        microvm = {
+          url = "github:microvm-nix/microvm.nix/${inputs.microvm.rev}";
+          inputs.nixpkgs.follows = "nixpkgs";
+        };
+        nixarchy = {
+          url = "github:Chronicuser21/nixarchy-aarch64/${inputs.self.shortRev or "dirty"}";
+          inputs.nixpkgs.follows = "nixpkgs";
+        };
+      };
+      outputs = { self, nixpkgs, nixarchy, home-manager, disko, ... }@inputs:
+        let
+          lib = nixpkgs.lib;
+        in {
+          nixosConfigurations.nixarchy = lib.nixosSystem {
+            system = "aarch64-linux";
+            specialArgs = {
+              inputs = inputs // { self = nixarchy; };
+            };
+            modules = [
+              nixarchy.nixosModules.nixarchy
+              home-manager.nixosModules.home-manager
+              disko.nixosModules.disko
+              ./configuration.nix
+            ];
+          };
+        };
+    }
+  '';
+
+  etcConfig = pkgs.runCommand "etc-nixos" { } ''
+    mkdir -p $out
+    cp ${./template}/configuration.nix $out/configuration.nix
+    cp ${etcFlakeNix} $out/flake.nix
+    cp ${inputs.self}/flake.lock $out/flake.lock
+    chmod -R u+w $out
+  '';
+in
 {
   imports = [
     (modulesPath + "/installer/scan/not-detected.nix")
     inputs.apple-silicon.nixosModules.apple-silicon-support
   ];
 
+  system.extraDependencies = inputSources;
+
   system.build.asahi-image = import ./make-disk-image.nix {
-    copyConfig = ./template;
+    copyConfig = etcConfig;
     memSize = 8192;
     inherit
       config
@@ -152,6 +243,8 @@
         "flakes"
       ];
       warn-dirty = false;
+      tarball-ttl = 0;
+      flake-registry = "";
     };
   };
 

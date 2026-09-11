@@ -196,9 +196,13 @@ else
   # and release.yml already asserts that half matches what the flake vendors.
   rel_omarchy=${rel_tag#v}
   rel_omarchy=${rel_omarchy%-*}
-  rel_age=$((($(date +%s) - $(date -d "$rel_when" +%s)) / 86400))
+  if [ -n "$rel_when" ] && [ "$rel_when" != "null" ]; then
+    rel_age=$((($(date +%s) - $(date -d "$rel_when" +%s)) / 86400))
+  else
+    rel_age=""
+  fi
   if [ "$rel_omarchy" = "$pkg_version" ]; then
-    ok "release" "$rel_tag" "vendors $pkg_version, ${rel_age}d old"
+    ok "release" "$rel_tag" "vendors $pkg_version, ${rel_age:+${rel_age}d old}${rel_age:-age unknown}"
   else
     finding "release" "$rel_tag (Omarchy $rel_omarchy)" "main vendors $pkg_version" \
       "no ISO for it -- tag v$pkg_version-1 to publish one"
@@ -319,29 +323,37 @@ ci() {
     return
   fi
   IFS=$'\t' read -r conclusion when <<<"$line"
-  age=$((($(date +%s) - $(date -d "$when" +%s)) / 3600))
+  # createdAt can be "null" when the run is still queued or the API
+  # returns incomplete data; date -d on that string would fail.
+  if [ -n "$when" ] && [ "$when" != "null" ]; then
+    age=$((($(date +%s) - $(date -d "$when" +%s)) / 3600))
+  else
+    age=""
+  fi
   case "$conclusion" in
     success) : ;;
     null | "")
       # Still going. Not a finding -- this job runs at 06:00 and nightly can
       # still be installing a desktop.
-      ok "$wf" "${age}h ago" "still running"
+      ok "$wf" "${age:+${age}h ago}${age:-?}" "still running"
       return
       ;;
     cancelled)
       # The one that went unreported for two nights. Almost always a timeout.
-      finding "$wf" "${age}h ago" "cancelled" "timed out, most likely -- raise the budget or split the job"
+      finding "$wf" "${age:+${age}h ago}${age:-?}" "cancelled" "timed out, most likely -- raise the budget or split the job"
       return
       ;;
     *)
-      finding "$wf" "${age}h ago" "$conclusion" "read the run"
+      finding "$wf" "${age:+${age}h ago}${age:-?}" "$conclusion" "read the run"
       return
       ;;
   esac
-  if [ "$age" -gt "$stale_hours" ]; then
+  if [ -n "$age" ] && [ "$age" -gt "$stale_hours" ]; then
     finding "$wf" "${age}h ago" "last run passed" "but nothing has run for ${age}h"
-  else
+  elif [ -n "$age" ]; then
     ok "$wf" "${age}h ago" "$conclusion"
+  else
+    ok "$wf" "unknown age" "$conclusion"
   fi
 }
 
