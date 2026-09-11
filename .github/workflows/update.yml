@@ -91,15 +91,14 @@ jobs:
         if: steps.bump.outputs.changed == 'true'
         uses: peter-evans/create-pull-request@v8
         with:
-          # Opened under BUMP_TOKEN so build.yml actually runs on it. With the
-          # default GITHUB_TOKEN a pull request triggers no workflows at all,
-          # which made the claim in the body below -- "Every package here built
-          # successfully in CI" -- mean only "built in this same job".
-          # Measured 2026-09-05: a PR opened with BUMP_TOKEN started six check
-          # runs within fifteen seconds; the same query against a
-          # GITHUB_TOKEN-opened PR returned zero. This one still does NOT
-          # auto-merge, for the reason the body gives.
-          token: ${{ secrets.BUMP_TOKEN || github.token }}
+          # The default token, always. This used to be BUMP_TOKEN so the PR
+          # would trigger build.yml; the secret kept being rejected on the
+          # push with a 403 ("Permission ... denied to Chronicuser21"), and a
+          # defined-but-broken secret always beats the `|| github.token`
+          # fallback below it. The default token opens the PR every time, and
+          # it cannot trigger workflows on that PR -- said in the body, not
+          # hidden -- so the checks have to be started from the Actions tab.
+          token: ${{ github.token }}
           branch: update/pinned-packages
           title: "Bump pinned packages"
           commit-message: |
@@ -112,7 +111,9 @@ jobs:
             whatever nixpkgs a user's own `nix flake update` resolves.
 
             Every package here built in the job that opened this pull
-            request, and the repository CI runs on it as well.
+            request. A PR opened by the default GITHUB_TOKEN runs no CI of
+            its own, so start this workflow from the Actions tab on the
+            pull request branch -- then merge by hand.
 
             **A build is not proof the app still works.** Two of these are
             proprietary Electron bundles that can compile fine and crash at

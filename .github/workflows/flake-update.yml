@@ -183,15 +183,18 @@ jobs:
         if: steps.bump.outputs.changed == 'true' && steps.evaluates.outputs.ok == 'true'
         uses: peter-evans/create-pull-request@v8
         with:
-          # A PR opened with the default GITHUB_TOKEN triggers no workflows at
-          # all, so its required contexts never report and an armed auto-merge
-          # waits forever. BUMP_TOKEN opens it under a real identity and the
-          # checks run. Measured on 2026-09-05: a PR opened with BUMP_TOKEN
-          # started six check runs within fifteen seconds; the same query
-          # against a GITHUB_TOKEN-opened PR returned zero. Without the secret
-          # this falls back and the merge step below fails saying precisely
-          # that, rather than arming a merge that can never fire.
-          token: ${{ secrets.BUMP_TOKEN || github.token }}
+          # The default token, always. This used to be BUMP_TOKEN -- a PAT
+          # meant to make the PR trigger build.yml like a person's would,
+          # because a GITHUB_TOKEN-opened PR runs no workflows (GitHub's guard
+          # against recursion). The secret kept being rejected on the push
+          # with a 403 ("Permission to Chronicuser21/nixarchy-aarch64.git
+          # denied to Chronicuser21"), and a defined-but-broken secret always
+          # beats the `|| github.token` fallback that used to sit below it:
+          # GitHub's expression resolves the secret's value, however useless,
+          # and never reaches the fallback. The default token opens the PR
+          # every time, and the cost is stated rather than hidden -- it runs
+          # no checks, so the merge step below tells a human to start them.
+          token: ${{ github.token }}
           # Dated, not constant. A bump that stops for a human -- an eval
           # break, a package that vanished from nixpkgs -- keeps its branch
           # while the next night still gets a clean attempt of its own.
@@ -213,10 +216,12 @@ jobs:
             - `.#checks.x86_64-linux.vm-toplevel` evaluates
             - `.#checks.x86_64-linux.reference-toplevel` evaluates
 
-            That is an evaluation check, not a build. **The gate is the CI on
-            this pull request**, which runs because the PR was opened with
-            `BUMP_TOKEN`; it merges when the required contexts report green and
-            not before.
+            That is an evaluation check, not a build. **This PR does not run
+            CI on its own**: it was opened with the default GITHUB_TOKEN,
+            which GitHub deliberately does not treat as a trusted trigger (the
+            BUMP_TOKEN that used to do this kept being rejected). Start
+            `build` and `install check` on this branch from the Actions tab,
+            then merge it by hand.
 
             What CI does not cover: an app that builds and then misbehaves at
             runtime. If a package here is one you rely on, launch it before
@@ -224,7 +229,13 @@ jobs:
           labels: dependencies
           delete-branch: true
 
-      - name: Arm auto-merge, gated on the required checks
+      # A bump that lands by itself is the whole point of this workflow, and
+      # GITHUB_TOKEN cannot produce one: a PR it opens triggers no workflows,
+      # so the required contexts never report and auto-merge would wait
+      # forever -- the "silently never lands" state the guard this replaces
+      # existed to make loud. With BUMP_TOKEN gone the honest shape is a note
+      # naming the two manual steps, verified rather than assumed.
+      - name: Start the checks and merge by hand
         if: steps.bump.outputs.changed == 'true' && steps.pr.outputs.pull-request-number
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -233,36 +244,27 @@ jobs:
           set -euo pipefail
           pr=${{ steps.pr.outputs.pull-request-number }}
 
-          # Needs "Allow auto-merge" (Settings -> General). If it is off, fail
-          # here and say so: the PR is open and safe to merge by hand.
-          if ! gh pr merge "$pr" --auto --squash --delete-branch; then
-            echo "::error::could not arm auto-merge on #$pr -- most likely" \
-              "'Allow auto-merge' is off in the repository settings. The PR" \
-              "is open and waiting; merge it by hand once its checks pass."
-            exit 1
+          # A PR that somehow DID pick up check runs gets the merge this
+          # workflow used to give every bump, rather than a note that would be
+          # wrong about it.
+          sha=$(gh pr view "$pr" --json headRefOid --jq .headRefOid)
+          n=$(gh api "repos/$GH_REPO/commits/$sha/check-runs" --jq .total_count)
+          if [ "$n" -gt 0 ]; then
+            if gh pr merge "$pr" --auto --squash --delete-branch; then
+              echo "auto-merge armed for the nixpkgs bump (#$pr, $n check runs under way)" \
+                >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "::warning::could not arm auto-merge on #$pr -- merge it by hand once its checks pass."
+            fi
+            exit 0
           fi
 
-          # Armed is not merged. Auto-merge waits for required contexts, which
-          # exist only if opening the PR triggered the workflows. Left
-          # undetected that is a bump which silently never lands: green job,
-          # armed PR, checks that never arrive. Same guard as omarchy.yml, and
-          # for the same reason.
-          sha=$(gh pr view "$pr" --json headRefOid --jq .headRefOid)
-          n=0
-          for _ in 1 2 3 4 5 6; do
-            sleep 20
-            n=$(gh api "repos/$GH_REPO/commits/$sha/check-runs" --jq .total_count)
-            [ "$n" -gt 0 ] && break
-          done
-          if [ "$n" -eq 0 ]; then
-            echo "::error::no checks started on #$pr after two minutes. The PR" \
-              "was opened with the default GITHUB_TOKEN, which triggers no" \
-              "workflows, so auto-merge can never fire. Set the BUMP_TOKEN" \
-              "secret. The PR is open; run the checks and merge it by hand."
-            exit 1
-          fi
-          echo "auto-merge armed for the nixpkgs bump (#$pr, $n check runs under way)" \
-            >> "$GITHUB_STEP_SUMMARY"
+          echo "PR #$pr is open (nixpkgs bump)." >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "It was opened with the default GITHUB_TOKEN, so GitHub runs no" >> "$GITHUB_STEP_SUMMARY"
+          echo "checks on it. Start \`build\` and \`install check\` on the" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`update/nixpkgs-${{ github.run_id }}\` branch from the Actions tab," >> "$GITHUB_STEP_SUMMARY"
+          echo "then merge #$pr by hand." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Say so when there was nothing to do
         if: steps.bump.outputs.changed != 'true'

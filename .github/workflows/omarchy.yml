@@ -426,19 +426,16 @@ jobs:
         id: pr
         uses: peter-evans/create-pull-request@v8
         with:
-          # A PR opened with the default GITHUB_TOKEN triggers no
-          # pull_request workflows at all -- GitHub's guard against runaway
-          # recursion, and measured here: PR #1's head commit carries ZERO
-          # check runs. That was invisible while the merge below used
-          # --admin, and fatal once it waits for checks instead: required
-          # contexts that never report never turn green. BUMP_TOKEN -- a
-          # fine-grained PAT or app token with contents and pull-requests
-          # write -- makes the PR trigger build.yml like a person's would.
-          # Without the secret this falls back to the default token, the
-          # checks still do not run, and the merge step below fails saying
-          # exactly that rather than arming an auto-merge that can never
-          # fire.
-          token: ${{ secrets.BUMP_TOKEN || github.token }}
+          # The default token, always. This used to be BUMP_TOKEN so the PR
+          # would trigger build.yml like a person's would -- a
+          # GITHUB_TOKEN-opened PR runs no pull_request workflows (GitHub's
+          # guard against recursion). The secret kept being rejected on the
+          # push with a 403 ("Permission to ... denied to Chronicuser21"),
+          # and a defined-but-broken secret always beats the `|| github.token`
+          # fallback that used to sit below it. The default token opens the
+          # PR every time, and the merge step below states the price instead
+          # of hiding it: no checks run, so the bump is merged by hand.
+          token: ${{ github.token }}
           # The version is in the branch name, not just the title. With a
           # constant name, a bump that stops for a human -- a new app to map,
           # a moved anchor -- is overwritten by the next night's run, and the
@@ -451,7 +448,10 @@ jobs:
           body: |
             Bumps the vendored Omarchy to `${{ steps.rel.outputs.latest }}`.
 
-            Merges automatically once the required checks report green.
+            Merges by hand: a PR opened with the default GITHUB_TOKEN runs no
+            CI of its own, so start this workflow from the Actions tab on the
+            pull request branch first.
+
             This job has already proved, against the new tree:
 
             - the vendored tree builds
@@ -496,57 +496,43 @@ jobs:
       # robot at 4am was the one class none of the gates applied to.
       #
       # --auto arms GitHub's own auto-merge instead: the PR lands when the
-      # required checks report green, and not before. What it costs is one
-      # CI cycle of latency (~19 minutes) on a PR nobody is waiting up for.
-      - name: Arm auto-merge, gated on the required checks
+      # required checks report green, and not before. What it LOSES now is
+      # the trigger: the default token this PR is opened with runs no checks
+      # (see the open step), so auto-merge could not fire. The step therefore
+      # checks for runs before arming, and otherwise says what a human has to
+      # do rather than failing a job that produced a perfectly good PR.
+      - name: Start the checks and merge by hand
         if: steps.rel.outputs.changed == 'true' && steps.pr.outputs.pull-request-number
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: |
-          # The twin of this block in flake-update.yml has had this line since
-          # it was written and this one never did -- the same script, copied,
-          # diverging in the one respect that decides whether a failure
-          # halfway through is noticed. Without it a `gh` call that fails
-          # leaves the step running on stale state and exiting 0.
           set -euo pipefail
 
           pr=${{ steps.pr.outputs.pull-request-number }}
 
-          # Needs the repository setting "Allow auto-merge" (Settings ->
-          # General). If it is off, fail HERE and say so: the PR is already
-          # open and safe to merge by hand, and the report step below fires.
-          if ! gh pr merge "$pr" --auto --squash --delete-branch; then
-            echo "::error::could not arm auto-merge on #$pr -- most likely" \
-              "'Allow auto-merge' is off in the repository settings. The PR" \
-              "is open and waiting; merge it by hand once its checks pass."
-            exit 1
+          # A PR that somehow DID pick up check runs gets the auto-merge this
+          # workflow used to give every bump. Needs "Allow auto-merge"
+          # (Settings -> General); if arming fails, say so and leave the PR
+          # to a human rather than exiting red over a PR that is fine.
+          sha=$(gh pr view "$pr" --json headRefOid --jq .headRefOid)
+          n=$(gh api "repos/$GH_REPO/commits/$sha/check-runs" --jq .total_count)
+          if [ "$n" -gt 0 ]; then
+            if gh pr merge "$pr" --auto --squash --delete-branch; then
+              echo "auto-merge armed for Omarchy ${{ steps.rel.outputs.latest }} (#$pr, $n check runs under way)" \
+                >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "::warning::could not arm auto-merge on #$pr -- merge it by hand once its checks pass."
+            fi
+            exit 0
           fi
 
-          # Armed is not merged. Auto-merge waits for the required contexts,
-          # which only exist if opening the PR triggered the workflows -- and
-          # a PR opened with the default GITHUB_TOKEN triggers none (see the
-          # token comment on the open step). Left undetected, that is a bump
-          # that silently never lands: green job, armed PR, checks that will
-          # never arrive. So wait up to two minutes for the first check run
-          # to appear on the head commit, and fail loudly if none does.
-          sha=$(gh pr view "$pr" --json headRefOid --jq .headRefOid)
-          n=0
-          for _ in 1 2 3 4 5 6; do
-            sleep 20
-            n=$(gh api "repos/$GH_REPO/commits/$sha/check-runs" --jq .total_count)
-            [ "$n" -gt 0 ] && break
-          done
-          if [ "$n" -eq 0 ]; then
-            echo "::error::no checks started on #$pr after two minutes. The" \
-              "PR was opened with the default GITHUB_TOKEN, which triggers" \
-              "no workflows, so auto-merge can never fire. Set the" \
-              "BUMP_TOKEN secret (see the open step above). The PR is open;" \
-              "run the checks and merge it by hand."
-            exit 1
-          fi
-          echo "auto-merge armed for Omarchy ${{ steps.rel.outputs.latest }} (#$pr, $n check runs under way)" \
-            >> "$GITHUB_STEP_SUMMARY"
+          echo "PR #$pr is open (Omarchy ${{ steps.rel.outputs.latest }})." >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "It was opened with the default GITHUB_TOKEN, so GitHub runs no" >> "$GITHUB_STEP_SUMMARY"
+          echo "checks on it. Start \`build\` and \`install check\` on the" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`update/omarchy-${{ steps.rel.outputs.latest }}\` branch from the Actions tab," >> "$GITHUB_STEP_SUMMARY"
+          echo "then merge #$pr by hand." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Report what needs a human
         # cancelled() as well as failure(): the timeout that killed this job
