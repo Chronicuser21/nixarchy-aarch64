@@ -143,6 +143,17 @@ jobs:
     name: install
     needs: gate
 
+    # DISABLED, 2026-09-11. The install job asks for a dedicated KVM box
+    # (`runs-on` below) and the repository has zero self-hosted runners
+    # registered, so every relevant push or PR queued forever waiting for
+    # one. Disabling per the maintainer's choice; `if: false` reports the job
+    # `skipped`, and main carries no required-status-checks so it cannot
+    # block a merge. This file's own note at the top is why the whole job is
+    # not simply deleted: re-enabling is deleting this one line, and the
+    # gate/denylist reasoning the file exists to preserve stays intact for
+    # that day. Nothing else in the job is touched.
+    if: false
+
     # One install VM at a time, machine-wide.
     #
     # This job boots a nested QEMU VM and runs an installer inside it against a
