@@ -119,6 +119,18 @@ jobs:
           # reasoning that was here is there, next to the list.
           relevant=$(.github/scripts/pr-touches-build.sh)
 
+          # INSTALLS DISABLED, 2026-09-11. The self-hosted KVM pool -- the four
+          # p510/p620 runners named below -- has ZERO machines registered, so a
+          # relevant run would ask for fleet that does not exist and queue
+          # forever. Until the pool is back, the gate reports nothing relevant
+          # whatever changed: install's steps all skip, the job still completes
+          # (the context stays reportable, which the denylist note at the top
+          # of this file is about), and it asks for the hosted runner so
+          # nothing waits on an absent machine. Re-enabling is deleting the
+          # line below: it is an override, not a replacement -- the real answer
+          # is still computed and takes effect the moment the line goes.
+          relevant=false
+
           echo "relevant=$relevant" >> "$GITHUB_OUTPUT"
 
           # And which machine `install` should ask for. A run with nothing to
@@ -142,17 +154,6 @@ jobs:
   install:
     name: install
     needs: gate
-
-    # DISABLED, 2026-09-11. The install job asks for a dedicated KVM box
-    # (`runs-on` below) and the repository has zero self-hosted runners
-    # registered, so every relevant push or PR queued forever waiting for
-    # one. Disabling per the maintainer's choice; `if: false` reports the job
-    # `skipped`, and main carries no required-status-checks so it cannot
-    # block a merge. This file's own note at the top is why the whole job is
-    # not simply deleted: re-enabling is deleting this one line, and the
-    # gate/denylist reasoning the file exists to preserve stays intact for
-    # that day. Nothing else in the job is touched.
-    if: false
 
     # One install VM at a time, machine-wide.
     #
