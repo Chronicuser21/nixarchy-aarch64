@@ -170,7 +170,8 @@ let
               enable = true;
               menuEntry.enable = true;
             };
-          }).xdg.configFile ? "omarchy/extensions/omarchy-menu.jsonc"
+          }).xdg.configFile
+            ? "omarchy/extensions/omarchy-menu.jsonc"
         );
     };
 
